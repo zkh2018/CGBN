@@ -24,6 +24,7 @@ IN THE SOFTWARE.
 
 #include <stdio.h>
 #include <stdlib.h>
+#include "cgbn_mem.h"
 
 #if !defined(__CUDACC__)
   typedef struct {uint32_t x; uint32_t y; uint32_t z;} dim3;
@@ -49,11 +50,11 @@ class cgbn_context_t;
 template<class context_t, uint32_t bits, cgbn_convergence_t convergence>
 class cgbn_env_t;
 
-template<uint32_t bits>
-struct cgbn_mem_t {
-  public:
-  uint32_t _limbs[(bits+31)/32];
-};
+//template<uint32_t bits>
+//struct cgbn_mem_t {
+//  public:
+//  uint32_t _limbs[(bits+31)/32];
+//};
 
 template<uint32_t tpi, class params=cgbn_default_parameters_t>
 class cgbn_context_t {

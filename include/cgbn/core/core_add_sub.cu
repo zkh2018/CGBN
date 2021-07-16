@@ -30,8 +30,9 @@ __device__ __forceinline__ int32_t core_t<env>::add(uint32_t r[LIMBS], const uin
 
   chain_t<> chain;
   #pragma unroll
-  for(int32_t index=0;index<LIMBS;index++)
+  for(int32_t index=0;index<LIMBS;index++){
     r[index]=chain.add(a[index], b[index]);
+  }
   carry=chain.add(0, 0);
   return fast_propagate_add(carry, r);
 }

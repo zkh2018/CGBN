@@ -9,7 +9,12 @@ pick:
 	@echo "   make volta"
 	@echo "   make turing"
 	@echo "   make ampere"
+	@echo "		make lib"
 	@echo
+
+lib:
+	nvcc -arch=sm_60 math.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples
+	nvcc -arch=sm_60 math.cu -lib -o libcgbn_math.a -I./include -I./samples
 
 clean:
 	make -C samples clean

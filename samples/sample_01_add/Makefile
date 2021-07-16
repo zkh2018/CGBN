@@ -7,6 +7,8 @@ ifndef GMP_HOME
   LIB :=
 endif
 
+$(INC)
+
 pick:
 	@echo
 	@echo Please run one of the following:

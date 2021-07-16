@@ -22,6 +22,9 @@ IN THE SOFTWARE.
 
 ***/
 
+#ifndef CGBN_H
+#define CGBN_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
@@ -505,3 +508,5 @@ template<class env_t>
 __host__ __device__ __forceinline__ void cgbn_store(env_t env, typename env_t::cgbn_local_t *address, const typename env_t::cgbn_t &a) {
   env.store(address, a);
 }
+
+#endif

@@ -22,6 +22,10 @@ IN THE SOFTWARE.
 
 ***/
 
+#ifndef CGBN_CUDA_H
+#define CGBN_CUDA_H
+#include "cgbn_mem.h"
+
 #include <cooperative_groups.h>
 namespace cg=cooperative_groups;
 
@@ -48,11 +52,11 @@ class cgbn_context_t;
 template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
 class cgbn_env_t;
 
-template<uint32_t bits>
-struct cgbn_mem_t {
-  public:
-  uint32_t _limbs[(bits+31)/32];
-};
+//template<uint32_t bits>
+//struct cgbn_mem_t {
+//  public:
+//  uint32_t _limbs[(bits+31)/32];
+//};
 
 /* main classes */
 template<uint32_t tpi, class params=cgbn_default_parameters_t>
@@ -258,3 +262,4 @@ experimental:
   template<uint32_t numbits> __device__ __forceinline__ void rotate_right(cgbn_t &r, const cgbn_t &a);
 
 */
+#endif
