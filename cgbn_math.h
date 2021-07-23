@@ -13,8 +13,8 @@ namespace gpu{
 
 void gpu_malloc(void** ptr, size_t size);
 void gpu_free(void*ptr);
-void copy_cpu_to_gpu(void* dst, void* src, size_t size);
-void copy_gpu_to_cpu(void* dst, void* src, size_t size);
+void copy_cpu_to_gpu(void* dst, const void* src, size_t size);
+void copy_gpu_to_cpu(void* dst, const void* src, size_t size);
 
 struct gpu_buffer{
   int total_n;
@@ -30,12 +30,25 @@ struct gpu_buffer{
 
   void copy_from_host(gpu_buffer& buf);
   void copy_to_host(gpu_buffer& buf);
+
+  void copy_from_host(const uint32_t* data, const uint32_t n);
+  void copy_to_host(uint32_t* data, const uint32_t n);
 };
 
 int add_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry, const uint32_t count);
 
 int sub_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry);
 int sub_1(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, uint32_t b, uint32_t* carry);
+
+int add(
+    cgbn_mem_t<BITS>* x1, cgbn_mem_t<BITS>* y1, cgbn_mem_t<BITS>* z1, 
+    cgbn_mem_t<BITS>* x2, cgbn_mem_t<BITS>* y2, cgbn_mem_t<BITS>* z2, 
+    cgbn_mem_t<BITS>* x_out, cgbn_mem_t<BITS>* y_out, cgbn_mem_t<BITS>* z_out);
+
+int mul_two_num(
+    cgbn_mem_t<BITS>* c_low, 
+    cgbn_mem_t<BITS>* c_high, 
+    cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, const uint32_t count);
 
 }//gpu
 

@@ -351,6 +351,14 @@ __device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::mul(cgbn_
   
   cgbn::mpzero<LIMBS>(add);
   cgbn::core_singleton_t<cgbn_env_t, LIMBS>::mul(r._limbs, a._limbs, b._limbs, add);
+  if(threadIdx.x == 0)
+  {
+    printf("limbs=%u\n", LIMBS);
+    for(int i = 0; i < LIMBS; i++){
+      printf("%u ", add[i]);
+    }
+    printf("\n");
+  }
 }
 
 template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
