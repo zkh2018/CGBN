@@ -351,14 +351,6 @@ __device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::mul(cgbn_
   
   cgbn::mpzero<LIMBS>(add);
   cgbn::core_singleton_t<cgbn_env_t, LIMBS>::mul(r._limbs, a._limbs, b._limbs, add);
-  if(threadIdx.x == 0)
-  {
-    printf("limbs=%u\n", LIMBS);
-    for(int i = 0; i < LIMBS; i++){
-      printf("%u ", add[i]);
-    }
-    printf("\n");
-  }
 }
 
 template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
@@ -1391,6 +1383,22 @@ __device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::load(cgbn
       r._limbs[limb]=address->_limbs[group_thread*LIMBS + limb];
   }
 }
+template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
+__device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::load(cgbn_t &r, uint32_t *const address) const {
+  int32_t group_thread=threadIdx.x & TPI-1;
+  int32_t limb;
+
+  #pragma unroll
+  for(limb=0;limb<LIMBS;limb++) {
+    if(PADDING!=0) {
+      r._limbs[limb]=0;
+      if(group_thread*LIMBS<BITS/32-limb) 
+        r._limbs[limb]=address[group_thread*LIMBS + limb];
+    }
+    else
+      r._limbs[limb]=address[group_thread*LIMBS + limb];
+  }
+}
 
 template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
 __device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::store(cgbn_mem_t<bits> *address, const cgbn_t &a) const {
@@ -1412,6 +1420,28 @@ __device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::store(cgb
     }
     else
       address->_limbs[group_thread*LIMBS + limb]=a._limbs[limb];
+  }
+}
+template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
+__device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::store(uint32_t *address, const cgbn_t &a) const {
+  int32_t group_thread=threadIdx.x & TPI-1;
+  int32_t limb;
+
+  #pragma unroll
+  for(limb=0;limb<LIMBS;limb++) {
+    if(PADDING!=0) {
+      if(group_thread*LIMBS<BITS/32-limb)
+        address[group_thread*LIMBS + limb]=a._limbs[limb];
+#if 1
+      else
+        if(a._limbs[limb]!=0) {
+          printf("BAD LIMB: %d %d %d\n", blockIdx.x, threadIdx.x, limb);
+          __trap();
+        }
+#endif
+    }
+    else
+      address[group_thread*LIMBS + limb]=a._limbs[limb];
   }
 }
 

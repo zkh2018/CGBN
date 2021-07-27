@@ -15,6 +15,7 @@ void gpu_malloc(void** ptr, size_t size);
 void gpu_free(void*ptr);
 void copy_cpu_to_gpu(void* dst, const void* src, size_t size);
 void copy_gpu_to_cpu(void* dst, const void* src, size_t size);
+void copy_gpu_to_gpu(void* dst, const void* src, size_t size);
 
 struct gpu_buffer{
   int total_n;
@@ -36,19 +37,25 @@ struct gpu_buffer{
 };
 
 int add_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry, const uint32_t count);
+int add_1(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, uint32_t b, uint32_t* carry, const uint32_t count);
 
-int sub_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry);
-int sub_1(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, uint32_t b, uint32_t* carry);
+int sub_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry, const uint32_t count);
+int sub_1(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, uint32_t b, uint32_t* carry, const uint32_t count);
 
 int add(
     cgbn_mem_t<BITS>* x1, cgbn_mem_t<BITS>* y1, cgbn_mem_t<BITS>* z1, 
     cgbn_mem_t<BITS>* x2, cgbn_mem_t<BITS>* y2, cgbn_mem_t<BITS>* z2, 
     cgbn_mem_t<BITS>* x_out, cgbn_mem_t<BITS>* y_out, cgbn_mem_t<BITS>* z_out);
 
+int mul_reduce(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, uint32_t inv, cgbn_mem_t<BITS>* module_data, uint32_t *res, const uint32_t count);
+
 int mul_two_num(
     cgbn_mem_t<BITS>* c_low, 
     cgbn_mem_t<BITS>* c_high, 
     cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, const uint32_t count);
+
+int mul_1(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, uint32_t b, uint32_t* carry, const uint32_t count);
+
 
 }//gpu
 

@@ -491,11 +491,20 @@ template<class env_t>
 __host__ __device__ __forceinline__ void cgbn_load(env_t env, typename env_t::cgbn_t &r, cgbn_mem_t<env_t::BITS> *const address) {
   env.load(r, address);
 }
+template<class env_t>
+__host__ __device__ __forceinline__ void cgbn_load(env_t env, typename env_t::cgbn_t &r, uint32_t *const address) {
+  env.load(r, address);
+}
 
 template<class env_t>
 __host__ __device__ __forceinline__ void cgbn_store(env_t env, cgbn_mem_t<env_t::BITS> *address, const typename env_t::cgbn_t &a) {
   env.store(address, a);
 }
+template<class env_t>
+__host__ __device__ __forceinline__ void cgbn_store(env_t env, uint32_t *address, const typename env_t::cgbn_t &a) {
+  env.store(address, a);
+}
+
 
 
 /* load/store to local memory */

@@ -18,6 +18,7 @@ lib:
 
 test: lib test.cpp
 	g++ test.cpp -o test -lcgbn_math -lcudart -lgmp -L./ -L/usr/local/cuda/lib64/ -I/usr/local/cuda/include -Iinclude/ -Isamples -I./
+	./test
 
 clean:
 	make -C samples clean

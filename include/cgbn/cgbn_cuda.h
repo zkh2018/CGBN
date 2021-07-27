@@ -243,7 +243,9 @@ class cgbn_env_t {
 
   /* load/store to global or shared memory */
   __device__ __forceinline__ void       load(cgbn_t &r, cgbn_mem_t<bits> *const address) const;
+  __device__ __forceinline__ void       load(cgbn_t &r, uint32_t *const address) const;
   __device__ __forceinline__ void       store(cgbn_mem_t<bits> *address, const cgbn_t &a) const;
+  __device__ __forceinline__ void       store(uint32_t *address, const cgbn_t &a) const;
 
   /* load/store to local memory */
   __device__ __forceinline__ void       load(cgbn_t &r, cgbn_local_t *const address) const;
