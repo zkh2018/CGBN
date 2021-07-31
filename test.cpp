@@ -119,8 +119,18 @@ void test_add_ui32(){
 }
 
 void test_mul_reduce(){
+  //15230403791020821917 754611498739239741 7381016538464732716 1011752739694698287                                                                                                              
+  //4332616871279656263 10917124144477883021 13281191951274694749 
+  //3486998266802970665                                                                                                            
+  //9786893198990664585                        
+  //uint64_t test_in1[4] = {15230403791020821917, 754611498739239741, 7381016538464732716, 1011752739694698287}; 
+  //uint64_t test_in2[4] = {4332616871279656263, 10917124144477883021, 13281191951274694749, 3486998266802970665};
+  uint64_t test_in1[4] = {10423178207724922205, 5683435405506315886, 15722591489810629541, 3357719272609950010};
+  uint64_t test_in2[4] = {4332616871279656263, 10917124144477883021, 13281191951274694749, 3486998266802970665};
+  uint64_t test_inv = 9786893198990664585;
   gpu_buffer in1, in2, module_data, out, din1, din2, dmodule_data, dout;
-  uint32_t inv = 100;
+  //uint32_t inv = 100;
+  uint64_t inv = test_inv;
   in1.resize_host(1);
   in2.resize_host(1);
   module_data.resize_host(1);
@@ -131,10 +141,13 @@ void test_mul_reduce(){
   dmodule_data.resize(1);
   dout.resize(1);
 
+  uint32_t *test_p32_1 = (uint32_t*)test_in1;
+  uint32_t *test_p32_2 = (uint32_t*)test_in2;
+
   for(int i = 0; i < BITS/32; i++){
-    in1.ptr->_limbs[i] = i*60;
-    in2.ptr->_limbs[i] = i*100 + 1;
-    module_data.ptr->_limbs[i] = i*50 + 2;
+    in1.ptr->_limbs[i] = test_p32_1[i];
+    in2.ptr->_limbs[i] = test_p32_1[i];
+    module_data.ptr->_limbs[i] = test_p32_2[i];
   }
 
   din1.copy_from_host(in1);
@@ -162,12 +175,6 @@ void test_mul_reduce(){
   const int n = BITS/64;
   mp_limb_t res[2*n], res2[2*n];
   mpn_mul_n(res, min1, min2, n);
-  //uint32_t *p = (uint32_t*)res;
-  //for(int i = 0; i < BITS/32*2; i++){
-  //  printf("%u ", p[i]);
-  //}
-  //printf("\n");
-  //mp_limb_t minv = *((uint64_t*)inv);
   memcpy(res2, res, 2*n * sizeof(mp_limb_t));
 
   for (size_t i = 0; i < n; ++i)
@@ -180,17 +187,10 @@ void test_mul_reduce(){
     tmpk[0] = k;
     mp_limb_t tmp_res[2*n];
     mpn_mul_n(tmp_res, mmodule_data, tmpk, n);
-    mp_limb_t tmp_carry_out = mpn_add_n(res2+i, res2+i, tmp_res, n);
-    //if(memcmp(res, res2, 2*n*sizeof(mp_limb_t))!=0){
-    //  printf("failed : %d %lu %lu\n", i, carryout, tmp_carry_out);
-    //  for(int j = 0; j<2*n; j++){
-    //    printf("%lu %lu, ", res[j], res2[j]);
-    //  }
-    //  printf("\n");
-    //  return;
-    //}
 
-    assert(tmp_carry_out == 0);
+    mp_limb_t tmp_carry_out = mpn_add_n(res2+i, res2+i, tmp_res, n);
+
+    //assert(tmp_carry_out == 0);
     carryout = mpn_add_1(res+n+i, res+n+i, n-i, carryout);
     tmp_carry_out = mpn_add_1(res2+n+i, res2+n+i, n-i, tmp_carry_out + tmp_res[n]);
    // mp_limb_t maxvalue = 0xffffffff;

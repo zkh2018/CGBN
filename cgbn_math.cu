@@ -7,7 +7,7 @@
 #include "utility/cpu_simple_bn_math.h"
 #include "utility/gpu_support.h"
 
-#define TPI 8
+#define TPI 32
 typedef cgbn_context_t<TPI> context_t;
 typedef cgbn_env_t<context_t, BITS> env_t;
 
@@ -61,6 +61,13 @@ void gpu_buffer::resize_host(int new_n){
   memset(ptr, 0, sizeof(cgbn_mem_t<BITS>) * new_n);
 }
 
+void gpu_buffer::release(){
+  CUDA_CHECK(cudaFree(ptr));
+}
+void gpu_buffer::release_host(){
+  free(ptr);
+}
+
 void gpu_buffer::copy_from_host(gpu_buffer& buf){
   copy_cpu_to_gpu(ptr, buf.ptr, n * sizeof(cgbn_mem_t<BITS>));
 }
@@ -75,6 +82,18 @@ void gpu_buffer::copy_to_host(uint32_t* data, const uint32_t n){
 }
 
 __global__ void kernel_add(cgbn_error_report_t* report, cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t *carry, const uint32_t count){
+  int instance = (blockIdx.x*blockDim.x + threadIdx.x)/TPI;
+  if(instance >= count) return;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());                     // construct an environment for 1024-bit math
+  env_t::cgbn_t  ta, tb, tc;                                             // define a, b, r as 1024-bit bignums
+  cgbn_load(bn_env, ta, a);      // load my instance's a value
+  cgbn_load(bn_env, tb, b);      // load my instance's b value
+  *carry = cgbn_add(bn_env, tc, ta, tb);                           // r=a+b
+  cgbn_store(bn_env, c, tc);   // store r into sum
+}
+__global__ void kernel_add(cgbn_error_report_t* report, uint32_t* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t *carry, const uint32_t count){
   int instance = (blockIdx.x*blockDim.x + threadIdx.x)/TPI;
   if(instance >= count) return;
 
@@ -213,49 +232,63 @@ __global__ void kernel_addmul_1(cgbn_error_report_t* report, uint32_t* res, uint
     cgbn_store(bn_env, res+n+i, add_res);   // store r into sum
   }
 }
+
 __global__ void kernel_mul_reduce(cgbn_error_report_t* report, uint32_t* res,cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, uint64_t inv, const uint32_t count){
   int instance = (blockIdx.x*blockDim.x + threadIdx.x)/TPI;
   if(instance >= count) return;
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());                     // construct an environment for 1024-bit math
-  env_t::cgbn_t  tin1, tin2, tmodule_data, tb, tres,tres2, add_res;                                             // define a, b, r as 1024-bit bignums
+  env_t::cgbn_t  tin1, tin2, tmodule_data, tb, tres,tres2, add_res, tinv;                                             
   cgbn_load(bn_env, tin1, in1);      // load my instance's a value
   cgbn_load(bn_env, tin2, in2);      // load my instance's a value
   cgbn_load(bn_env, tmodule_data, module_data);      // load my instance's a value
 
   const int n = BITS/32;
-  env_t::cgbn_wide_t tc, mul_res;
+  env_t::cgbn_wide_t tc;
   cgbn_mul_wide(bn_env, tc, tin1, tin2);
   cgbn_store(bn_env, res, tc._low);   // store r into sum
   cgbn_store(bn_env, res + n, tc._high);   // store r into sum
+  cgbn_mem_t<BITS> mem_inv;
+  uint32_t* p32_inv = (uint32_t*)&inv;
+  mem_inv._limbs[0] = p32_inv[0];
+  mem_inv._limbs[1] = p32_inv[1];
+  cgbn_load(bn_env, tinv, &mem_inv);
+
   for(int i = 0; i < n; i+=2){
     cgbn_load(bn_env, tres, res+i);      // load my instance's a value
     cgbn_load(bn_env, tres2, res+n+i);      // load my instance's a value
 
-    uint64_t* p64 = (uint64_t*)res;
-    uint64_t k = inv * p64[i/2]; 
-    uint32_t* p32 = (uint32_t*)&k;
     cgbn_mem_t<BITS> b;
-    b._limbs[0] = p32[0]; 
-    b._limbs[1] = p32[1]; 
+    uint64_t *p64 = (uint64_t*)(res+i);
+    uint64_t k = inv * p64[0];
+    uint32_t *p32 = (uint32_t*)&k;
+    b._limbs[0] = p32[0];
+    b._limbs[1] = p32[1];
     cgbn_load(bn_env, tb, &b);      // load my instance's a value
 
-    //cgbn_mul(bn_env, mul_res, tmodule_data, tb);                           
+    env_t::cgbn_wide_t mul_res;
     cgbn_mul_wide(bn_env, mul_res, tmodule_data, tb);
     uint32_t carryout = cgbn_add(bn_env, add_res, mul_res._low, tres);
     cgbn_store(bn_env, res+i, add_res);   // store r into sum
-    //cgbn_store(bn_env, &b, mul_res._high);
+    
+    //cgbn_add_ui32(bn_env, mul_res._low, mul_res._high, carryout);
+    cgbn_store(bn_env, &b, mul_res._high);
+    uint64_t tmp_carry = ((uint64_t*)b._limbs)[0];
+    
+    tmp_carry += carryout;
+    uint32_t *p = (uint32_t*)&tmp_carry;
+    b._limbs[0] = p[0];
+    b._limbs[1] = p[1];
     //cgbn_add_ui32(bn_env, add_res, tres2, carryout + b._limbs[0]);
-    cgbn_add(bn_env, add_res, tres2, mul_res._high);
+    cgbn_load(bn_env, tb, &b);      // load my instance's a value
+    cgbn_add(bn_env, add_res, tres2, tb);
     cgbn_store(bn_env, res+n+i, add_res);   // store r into sum
   }
-
   cgbn_load(bn_env, tres, res+n);
   if(cgbn_compare(bn_env, tres, tmodule_data) >= 0){
     cgbn_sub(bn_env, tres2, tres, tmodule_data);
     cgbn_store(bn_env, res+n, tres2);
   }
-
 }
 
 int add_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry, const uint32_t count){
@@ -343,7 +376,7 @@ int mul_two_num(
   return 0;
 }
 
-int mul_reduce(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, uint32_t inv, cgbn_mem_t<BITS>* module_data, uint32_t* res, const uint32_t count){
+int mul_reduce(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, uint64_t inv, cgbn_mem_t<BITS>* module_data, uint32_t* res, const uint32_t count){
   //int n = BITS/32;
   //uint32_t *res;
   //gpu_malloc((void**)&res, n * 3 * sizeof(uint32_t));
