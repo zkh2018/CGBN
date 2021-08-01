@@ -22,7 +22,10 @@ IN THE SOFTWARE.
 
 ***/
 
-void add_words(uint32_t *r, uint32_t *x, uint32_t *y, uint32_t count) {
+#ifndef CGBN_CPU_SIMPLE_BN_MATH_H
+#define CGBN_CPU_SIMPLE_BN_MATH_H
+
+inline void add_words(uint32_t *r, uint32_t *x, uint32_t *y, uint32_t count) {
   int     index;
   int64_t sum=0;
 
@@ -33,7 +36,7 @@ void add_words(uint32_t *r, uint32_t *x, uint32_t *y, uint32_t count) {
   }
 }
 
-void sub_words(uint32_t *r, uint32_t *x, uint32_t *y, uint32_t count) {
+inline void sub_words(uint32_t *r, uint32_t *x, uint32_t *y, uint32_t count) {
   int     index;
   int64_t sum=0;
 
@@ -44,3 +47,4 @@ void sub_words(uint32_t *r, uint32_t *x, uint32_t *y, uint32_t count) {
   }
 }
 
+#endif

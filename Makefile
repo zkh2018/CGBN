@@ -13,8 +13,8 @@ pick:
 	@echo
 
 lib:
-	nvcc -arch=sm_60 cgbn_math.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples
-	nvcc -arch=sm_60 cgbn_math.cu -lib -o libcgbn_math.a -I./include -I./samples
+	nvcc -arch=sm_60 cgbn_math.cu cgbn_fp.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples
+	nvcc -arch=sm_60 cgbn_math.cu cgbn_fp.cu -lib -o libcgbn_math.a -I./include -I./samples
 
 test: lib test.cpp
 	g++ test.cpp -o test -lcgbn_math -lcudart -lgmp -L./ -L/usr/local/cuda/lib64/ -I/usr/local/cuda/include -Iinclude/ -Isamples -I./

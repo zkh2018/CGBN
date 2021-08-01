@@ -1,6 +1,8 @@
 #include "cgbn_math.h"
+#include "cgbn_fp.h"
 #include <string.h>
 #include "assert.h"
+#include <time.h>
 
 using namespace gpu;
 
@@ -45,7 +47,10 @@ void test_add(){
   uint32_t carry, *d_carry;
   gpu_malloc((void**)&d_carry, sizeof(uint32_t));
 
+  clock_t start = clock();
   add_two_num(dc.ptr, da.ptr, db.ptr, d_carry, 1);
+  clock_t end = clock();
+  printf("gpu add : %fms\n", (double)(end-start)*1000.0/CLOCKS_PER_SEC);
   dc.copy_to_host(c);
   copy_gpu_to_cpu(&carry, d_carry, sizeof(uint32_t));
 
@@ -57,7 +62,10 @@ void test_add(){
   to_mpz(rb, b.ptr->_limbs, BITS/32);
   mpz_t rc;
   mpz_init(rc);
+  clock_t cpu_start = clock();
   mpz_add(rc, ra, rb);
+  clock_t cpu_end = clock();
+  printf("cpu add: %fms\n", (double)(cpu_end-cpu_start)*1000.0/CLOCKS_PER_SEC);
   uint32_t correct2[BITS/32+1];
   from_mpz(rc, correct2, BITS/32+1);
 
@@ -66,7 +74,7 @@ void test_add(){
   //  printf("(%u, %u)\n", correct2[i], c.ptr->_limbs[i]);
   //}
   int cmp_ret = memcmp(correct2, c.ptr->_limbs, BITS/32 * sizeof(int32_t));
-  printf("compare add result = %d\n", cmp_ret);
+  printf("compare add result = %d\n\n", cmp_ret);
 
 }
 void test_add_ui32(){
@@ -157,8 +165,11 @@ void test_mul_reduce(){
   uint32_t *gpu_res;
   gpu_malloc((void**)&gpu_res, BITS/32*3 * sizeof(uint32_t));
   uint32_t *host_res = new uint32_t[BITS/32*3];
-
+  
+  clock_t start = clock();
   mul_reduce(din1.ptr, din2.ptr, inv, dmodule_data.ptr, gpu_res, 1);
+  clock_t end = clock();
+  printf("gpu mul_reduce calc times: %fms\n", (double)(end-start) * 1000.0/CLOCKS_PER_SEC);
   copy_gpu_to_cpu(host_res, gpu_res, BITS/32*3*sizeof(uint32_t));
 
   mp_limb_t min1[BITS/64], min2[BITS/64], mmodule_data[BITS/64], mout[BITS/64];
@@ -177,34 +188,31 @@ void test_mul_reduce(){
   mpn_mul_n(res, min1, min2, n);
   memcpy(res2, res, 2*n * sizeof(mp_limb_t));
 
+  clock_t cpu_start = clock();
   for (size_t i = 0; i < n; ++i)
   {
     mp_limb_t k = inv * res[i];
     /* calculate res = res + k * mod * b^i */
     mp_limb_t carryout = mpn_addmul_1(res+i, mmodule_data, n, k);
 
-    mp_limb_t tmpk[n] = {0};
-    tmpk[0] = k;
-    mp_limb_t tmp_res[2*n];
-    mpn_mul_n(tmp_res, mmodule_data, tmpk, n);
-
-    mp_limb_t tmp_carry_out = mpn_add_n(res2+i, res2+i, tmp_res, n);
-
-    //assert(tmp_carry_out == 0);
+//    mp_limb_t tmpk[n] = {0};
+//    tmpk[0] = k;
+//    mp_limb_t tmp_res[2*n];
+//    mpn_mul_n(tmp_res, mmodule_data, tmpk, n);
+//
+//    mp_limb_t tmp_carry_out = mpn_add_n(res2+i, res2+i, tmp_res, n);
+//
     carryout = mpn_add_1(res+n+i, res+n+i, n-i, carryout);
-    tmp_carry_out = mpn_add_1(res2+n+i, res2+n+i, n-i, tmp_carry_out + tmp_res[n]);
-   // mp_limb_t maxvalue = 0xffffffff;
-   // assert(tmp_carry_out + tmp_res[n] <= maxvalue);
-    assert(carryout == 0);
-    assert(tmp_carry_out == 0);
+    //tmp_carry_out = mpn_add_1(res2+n+i, res2+n+i, n-i, tmp_carry_out + tmp_res[n]);
   }
   if(mpn_cmp(res+n, mmodule_data, n) >= 0){
-    printf("sub...\n");
     mp_limb_t borrow = mpn_sub(res+n, res+n, n, mmodule_data, n);
     assert(borrow == 0);
-    borrow = mpn_sub(res2+n, res2+n, n, mmodule_data, n);
-    assert(borrow == 0);
+    //borrow = mpn_sub(res2+n, res2+n, n, mmodule_data, n);
+    //assert(borrow == 0);
   }
+  clock_t cpu_end = clock();
+  printf("cpu mul_reuce calc times: %f\n", (double)(cpu_end-cpu_start)*1000.0/CLOCKS_PER_SEC);
   
   uint32_t *ptr32 = (uint32_t*)res;
   uint32_t *tmp_ptr32 = (uint32_t*)res2;
@@ -214,8 +222,9 @@ void test_mul_reduce(){
  // printf("\n");
   int cmp_ret_low = memcmp(ptr32, host_res, BITS/32*sizeof(uint32_t));
   int cmp_ret_high = memcmp(ptr32+BITS/32, host_res+BITS/32, BITS/32*sizeof(uint32_t));
-  int cmp_ret2 = memcmp(ptr32, tmp_ptr32, BITS/32*2*sizeof(uint32_t));
-  printf("compare mul_reduce result =%d %d %d\n", cmp_ret_low, cmp_ret_high, cmp_ret2);
+  //int cmp_ret2 = memcmp(ptr32, tmp_ptr32, BITS/32*2*sizeof(uint32_t));
+  //printf("compare mul_reduce result =%d %d %d\n", cmp_ret_low, cmp_ret_high, cmp_ret2);
+  printf("compare mul_reduce result =%d %d\n", cmp_ret_low, cmp_ret_high);
 
 }
 void test_mul(){
@@ -262,9 +271,15 @@ void test_mul(){
     ra[i] = p64_a[i];
     rb[i] = p64_b[i];
   }
+  clock_t cpu_start = clock();
   mpn_mul_n(rc, ra, rb, n);
+  clock_t cpu_end = clock();
 
+  clock_t start = clock();
   mul_two_num(dc_mul_low.ptr, dc_mul_high.ptr, da.ptr, db.ptr, 1);
+  clock_t end = clock();
+  printf("gpu mul: %fms\n", (double)(end-start)*1000.0/CLOCKS_PER_SEC);
+  printf("cpu mul: %fms\n", (double)(cpu_end-cpu_start)*1000.0/CLOCKS_PER_SEC);
   dc_mul_low.copy_to_host(c_mul_low);
   dc_mul_high.copy_to_host(c_mul_high);
 
@@ -286,7 +301,7 @@ void test_mul(){
   printf("compare mul low result = %d\n", cmp_ret);
   //cmp_ret = memcmp(correct2_mul + BITS/32, c_mul_high.ptr->_limbs, BITS/32 * sizeof(int32_t));
   cmp_ret = memcmp(p32 + n*2, c_mul_high.ptr->_limbs, BITS/32*sizeof(uint32_t));
-  printf("compare mul high result = %d\n", cmp_ret);
+  printf("compare mul high result = %d\n\n", cmp_ret);
 }
 
 void test_mul_ui32(){
@@ -356,15 +371,131 @@ void test_mul_ui32(){
   //int cmp_ret = memcmp(correct2_mul, c_mul_low.ptr->_limbs, BITS/32 * sizeof(int32_t));
   uint32_t* p32 = (uint32_t*)rc; 
   int cmp_ret = memcmp(p32, c_mul_low.ptr->_limbs, BITS/32*sizeof(uint32_t));
-  printf("compare mul_ui32 result = %d\n", cmp_ret);
+  printf("compare mul_ui32 result = %d\n\n", cmp_ret);
   //cmp_ret = memcmp(correct2_mul + BITS/32, c_mul_high.ptr->_limbs, BITS/32 * sizeof(int32_t));
 }
+
+void test_sub(){
+  gpu_buffer a, b, c, max_value;
+  a.resize_host(1);
+  b.resize_host(1);
+  c.resize_host(1);
+  max_value.resize_host(1);
+  for(int i = 0; i < BITS/32; i++){
+    a.ptr->_limbs[i] = i+2;
+    b.ptr->_limbs[i] = i+10;
+    max_value.ptr->_limbs[i] = 0xffffffff;
+  }
+
+  gpu_buffer da, db, dc, dc_tmp, dmax_value;
+  da.resize(1);
+  db.resize(1);
+  dc.resize(1);
+  dc_tmp.resize(1);
+  dmax_value.resize(1);
+  da.copy_from_host(a);
+  db.copy_from_host(b);
+  dmax_value.copy_from_host(max_value);
+
+  uint32_t carry, *d_carry;
+  gpu_malloc((void**)&d_carry, sizeof(uint32_t));
+
+  clock_t start = clock();
+  //sub_two_num(dc.ptr, da.ptr, db.ptr, d_carry, 1);
+  sub_two_num(dc_tmp.ptr, dmax_value.ptr, db.ptr, d_carry, 1);
+  add_two_num(dc.ptr, dc_tmp.ptr, da.ptr, d_carry, 1);
+  add_1(dc.ptr, dc.ptr, 1, d_carry, 1);
+  clock_t end = clock();
+  printf("gpu sub: %fms\n", (double)(end-start)*1000.0/CLOCKS_PER_SEC);
+  dc.copy_to_host(c);
+  copy_gpu_to_cpu(&carry, d_carry, sizeof(uint32_t));
+
+  const int n = BITS/64;
+  mp_limb_t ma[n+1], mb[n], mc[n], mmax_value[n];
+  memcpy(ma, a.ptr->_limbs, n * sizeof(mp_limb_t));
+  memcpy(mb, b.ptr->_limbs, n * sizeof(mp_limb_t));
+  memcpy(mmax_value, max_value.ptr->_limbs, n * sizeof(mp_limb_t));
+  clock_t cpu_start = clock();
+  ma[n] = 1;
+  mp_limb_t borrow = mpn_sub(mc, ma, n+1, mb, n);
+  clock_t cpu_end = clock();
+  printf("cpu sub: %fms\n", (double)(cpu_end-cpu_start)*1000.0/CLOCKS_PER_SEC);
+
+  uint32_t *p_c = (uint32_t*)mc;
+  int cmp_ret = memcmp(p_c, c.ptr->_limbs, BITS/32 * sizeof(int32_t));
+  printf("compare sub result = %d, %lu %d\n\n", cmp_ret, borrow, (int32_t)carry);
+}
+
+void test_fp_sub(){
+  uint64_t test_in1[4] = {10423178207724922205, 5683435405506315886, 15722591489810629541, 3357719272609950010};
+  uint64_t test_in2[4] = {4332616871279656263, 10917124144477883021, 13281191951274694749, 3486998266802970665};
+  gpu_buffer in1, in2, module_data, out, din1, din2, dmodule_data, dout;
+  in1.resize_host(1);
+  in2.resize_host(1);
+  module_data.resize_host(1);
+  out.resize_host(1);
+
+  din1.resize(1);
+  din2.resize(1);
+  dmodule_data.resize(1);
+  dout.resize(1);
+
+  uint32_t *test_p32_1 = (uint32_t*)test_in1;
+  uint32_t *test_p32_2 = (uint32_t*)test_in2;
+
+  for(int i = 0; i < BITS/32; i++){
+    in1.ptr->_limbs[i] = test_p32_1[i];
+    in2.ptr->_limbs[i] = test_p32_1[i];
+    module_data.ptr->_limbs[i] = test_p32_2[i];
+  }
+
+  din1.copy_from_host(in1);
+  din2.copy_from_host(in2);
+  dmodule_data.copy_from_host(module_data);
+
+  mp_limb_t min1[BITS/64], min2[BITS/64], mmodule_data[BITS/64], mout[BITS/64];
+  uint64_t *ptr1 = (uint64_t*)in1.ptr->_limbs;
+  uint64_t *ptr2 = (uint64_t*)in2.ptr->_limbs;
+  uint64_t *ptr3 = (uint64_t*)module_data.ptr->_limbs;
+  for(int i = 0; i < BITS/64; i++){
+    min1[i] = ptr1[i];
+    min2[i] = ptr2[i];
+    mmodule_data[i] = ptr3[i];
+	}
+
+  clock_t start = clock();
+  fp_sub(din1.ptr, din2.ptr, dmodule_data.ptr, 1);
+  clock_t end = clock();
+  printf("gpu fp_sub calc times: %fms\n", (double)(end-start) * 1000.0/CLOCKS_PER_SEC);
+  din1.copy_to_host(in1);
+
+
+  const int n = BITS/64;
+
+  clock_t cpu_start = clock();
+  mp_limb_t scratch[n+1];
+  if(mpn_cmp(min1, min2, n) < 0){
+    printf("in1 less than in2\n");
+    const mp_limb_t carry = mpn_add_n(scratch, min1, mmodule_data, n);
+    scratch[n] = carry;
+  }else{
+    mpn_copyi(scratch, min1, n);
+  }
+  const mp_limb_t borrow = mpn_sub(scratch, scratch, n+1, min2, n);
+
+  int cmp_ret = memcmp(in1.ptr->_limbs, scratch, n * sizeof(mp_limb_t));
+  printf("compare fb_sub result = %d\n", cmp_ret);
+}
+
 int main(){
   printf("gmp_num_bits=%u\n", GMP_NUMB_BITS);
+  test_add();
   test_add();
   test_mul();
   test_add_ui32();
   test_mul_reduce();
   test_mul_ui32();
+  test_sub();
+  test_fp_sub();
   return 0;
 }

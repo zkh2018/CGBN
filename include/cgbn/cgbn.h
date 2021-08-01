@@ -59,11 +59,11 @@ typedef enum {
   cgbn_halt_monitor,    /* writes errors to the reporter and halts */
 } cgbn_monitor_t;
 
-cudaError_t cgbn_error_report_alloc(cgbn_error_report_t **report);
-cudaError_t cgbn_error_report_free(cgbn_error_report_t *report);
-bool        cgbn_error_report_check(cgbn_error_report_t *report);
-void        cgbn_error_report_reset(cgbn_error_report_t *report);
-const char *cgbn_error_string(cgbn_error_report_t *report);
+inline cudaError_t cgbn_error_report_alloc(cgbn_error_report_t **report);
+inline cudaError_t cgbn_error_report_free(cgbn_error_report_t *report);
+inline bool        cgbn_error_report_check(cgbn_error_report_t *report);
+inline void        cgbn_error_report_reset(cgbn_error_report_t *report);
+inline const char *cgbn_error_string(cgbn_error_report_t *report);
 
 #include "cgbn.cu"
 

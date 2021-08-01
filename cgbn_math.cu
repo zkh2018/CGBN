@@ -7,7 +7,7 @@
 #include "utility/cpu_simple_bn_math.h"
 #include "utility/gpu_support.h"
 
-#define TPI 32
+#define TPI 16
 typedef cgbn_context_t<TPI> context_t;
 typedef cgbn_env_t<context_t, BITS> env_t;
 
