@@ -49,7 +49,6 @@ int add(
     cgbn_mem_t<BITS>* x2, cgbn_mem_t<BITS>* y2, cgbn_mem_t<BITS>* z2, 
     cgbn_mem_t<BITS>* x_out, cgbn_mem_t<BITS>* y_out, cgbn_mem_t<BITS>* z_out);
 
-int mul_reduce(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, uint64_t inv, cgbn_mem_t<BITS>* module_data, uint32_t *res, const uint32_t count);
 
 int mul_two_num(
     cgbn_mem_t<BITS>* c_low, 
