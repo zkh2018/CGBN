@@ -13,15 +13,14 @@
 #define TPI 8
 typedef cgbn_context_t<TPI> context_t;
 typedef cgbn_env_t<context_t, BITS> env_t;
+#define max_threads_per_block  (1024/TPI)
+
 
 namespace gpu{
 
-__global__ void kernel_fp_add(cgbn_error_report_t* report, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count){
-  int instance = (blockIdx.x*blockDim.x + threadIdx.x)/TPI;
-  if(instance >= count) return;
-  context_t bn_context(cgbn_report_monitor, report, instance);
-  env_t          bn_env(bn_context.env<env_t>());
+__device__ void device_fp_add(env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
   env_t::cgbn_t tin1, tin2, tmodule_data, tscratch;
+
   cgbn_load(bn_env, tin1, in1);
   cgbn_load(bn_env, tin2, in2);
   cgbn_load(bn_env, tmodule_data, module_data);
@@ -42,12 +41,15 @@ __global__ void kernel_fp_add(cgbn_error_report_t* report, cgbn_mem_t<BITS>* con
     cgbn_store(bn_env, in1, tscratch);
   }
 }
-
-__global__ void kernel_fp_sub(cgbn_error_report_t* report, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count){
+__global__ void kernel_fp_add(cgbn_error_report_t* report, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count){
   int instance = (blockIdx.x*blockDim.x + threadIdx.x)/TPI;
   if(instance >= count) return;
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());
+  device_fp_add(bn_env, in1 + instance, in2 + instance, module_data + instance, max_value);
+}
+
+__device__ void device_fp_sub(env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
   env_t::cgbn_t tin1, tin2, tmodule_data, tscratch;
   cgbn_load(bn_env, tin1, in1);
   cgbn_load(bn_env, tin2, in2);
@@ -69,6 +71,14 @@ __global__ void kernel_fp_sub(cgbn_error_report_t* report, cgbn_mem_t<BITS>* con
       cgbn_sub(bn_env, tscratch, tin1, tin2);
       cgbn_store(bn_env, in1, tscratch);
   }
+}
+
+__global__ void kernel_fp_sub(cgbn_error_report_t* report, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count){
+  int instance = (blockIdx.x*blockDim.x + threadIdx.x)/TPI;
+  if(instance >= count) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());
+  device_fp_sub(bn_env, in1 + instance, in2 + instance, module_data + instance, max_value);
 }
 
 __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res,cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* tmp_buffer, const uint64_t inv){
@@ -140,7 +150,10 @@ __global__ void kernel_mul_reduce(cgbn_error_report_t* report, uint32_t* res,cgb
 int fp_add(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count){
   cgbn_error_report_t *report;
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
-  kernel_fp_add<<<1, TPI>>>(report, in1, in2, module_data, max_value, count);
+  uint32_t instances = std::min(count, (uint32_t)max_threads_per_block);
+  uint32_t threads = instances * TPI;
+  uint32_t blocks = (count + instances - 1) / instances;
+  kernel_fp_add<<<blocks, threads>>>(report, in1, in2, module_data, max_value, count);
   CUDA_CHECK(cudaDeviceSynchronize());
   CGBN_CHECK(report);
   return 0;
@@ -149,7 +162,10 @@ int fp_add(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, cgbn_mem_t<BITS>* modul
 int fp_sub(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count){
   cgbn_error_report_t *report;
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
-  kernel_fp_sub<<<1, TPI>>>(report, in1, in2, module_data, max_value, count);
+  uint32_t instances = std::min(count, (uint32_t)max_threads_per_block);
+  uint32_t threads = instances * TPI;
+  uint32_t blocks = (count + instances - 1) / instances;
+  kernel_fp_sub<<<blocks, threads>>>(report, in1, in2, module_data, max_value, count);
   CUDA_CHECK(cudaDeviceSynchronize());
   CGBN_CHECK(report);
   return 0;
@@ -159,11 +175,11 @@ int fp_mul_reduce(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, uint64_t inv, cg
   cgbn_error_report_t *report;
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
 
-  const uint32_t max_threads_per_block = 1024/TPI;
-  uint32_t threads = std::min(count, max_threads_per_block);
-  uint32_t blocks = (count + threads - 1) / threads;
+  uint32_t instances = std::min(count, (uint32_t)max_threads_per_block);
+  uint32_t threads = instances * TPI;
+  uint32_t blocks = (count + instances - 1) / instances;
 
-  kernel_mul_reduce<<<blocks, TPI * threads>>>(report, res, in1, in2, module_data, tmp_buffer, inv, count);
+  kernel_mul_reduce<<<blocks, threads>>>(report, res, in1, in2, module_data, tmp_buffer, inv, count);
   CUDA_CHECK(cudaDeviceSynchronize());
   CGBN_CHECK(report);
   return 0;
