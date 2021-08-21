@@ -1,12 +1,13 @@
 #include "cgbn_math.h"
 #include "cgbn_fp.h"
+#include "cgbn_alt_bn128_g1.h"
 #include <string.h>
 #include "assert.h"
 #include <time.h>
 
 using namespace gpu;
 
-const int data_num = 1024*128;
+const int data_num = 1024;
 
 void to_mpz(mpz_t r, uint32_t *x, uint32_t count) {
   mpz_import(r, count, -1, sizeof(uint32_t), 0, 0, x);
@@ -603,16 +604,63 @@ void test_fp_add(){
   printf("compare fb_add result = %d\n\n", cmp_ret);
 }
 
+void test_alt_bn128_g1_add(){
+  alt_bn128_g1 a, b, c, da, db, dc;
+  a.init_host(data_num);
+  b.init_host(data_num);
+  c.init_host(data_num);
+  da.init(data_num);
+  db.init(data_num);
+  dc.init(data_num);
+
+  for(int i = 0; i < data_num; i++){
+    for(int j = 0; j < BITS/32; j++){
+      a.x.mont_repr_data[i]._limbs[j] = i+j;
+      a.x.modulus_data[i]._limbs[j] = i+j;
+      a.y.mont_repr_data[i]._limbs[j] = i+j;
+      a.y.modulus_data[i]._limbs[j] = i+j;
+      a.z.mont_repr_data[i]._limbs[j] = i+j;
+      a.z.modulus_data[i]._limbs[j] = i+j;
+
+      b.x.mont_repr_data[i]._limbs[j] = i+j;
+      b.x.modulus_data[i]._limbs[j] = i+j;
+      b.y.mont_repr_data[i]._limbs[j] = i+j;
+      b.y.modulus_data[i]._limbs[j] = i+j;
+      b.z.mont_repr_data[i]._limbs[j] = i+j;
+      b.z.modulus_data[i]._limbs[j] = i+j;
+    }
+  }
+  da.copy_from_cpu(a);
+  db.copy_from_cpu(b);
+  dc.copy_from_cpu(c);
+
+  uint32_t *gpu_res;
+  gpu_malloc((void**)&gpu_res, data_num * BITS/32*3 * sizeof(uint32_t));
+  gpu_buffer tmp_buffer, max_value, dmax_value;
+  tmp_buffer.resize(data_num);
+  max_value.resize_host(1);
+  dmax_value.resize(1);
+  clock_t gpu_start = clock();
+  alt_bn128_g1_add(da, db, dc, data_num, gpu_res, tmp_buffer.ptr, dmax_value.ptr);
+  clock_t gpu_end = clock();
+  printf("gpu alt_bn128_g1_add calc times: %f\n", (double)(gpu_end - gpu_start) * 1000.0 / CLOCKS_PER_SEC);
+
+
+}
+
 int main(){
-  printf("gmp_num_bits=%u\n", GMP_NUMB_BITS);
+  //printf("gmp_num_bits=%u\n", GMP_NUMB_BIS);
+  printf("data number = %d\n\n", data_num);
   //test_add();
   //test_add();
   //test_mul();
   //test_add_ui32();
-  test_mul_reduce();
+  //test_mul_reduce();
   //test_mul_ui32();
   //test_sub();
-  test_fp_sub();
-  test_fp_add();
+  //test_fp_sub();
+  //test_fp_add();
+
+  test_alt_bn128_g1_add();
   return 0;
 }
