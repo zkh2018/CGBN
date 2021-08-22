@@ -77,6 +77,26 @@ struct DevFp{
     ret.inv = inv;
     return ret;
   }
+
+  inline __device__ void print_array(env_t& bn_env, env_t::cgbn_t& data, cgbn_mem_t<BITS>* buffer){
+    cgbn_store(bn_env, buffer, data);
+    if(threadIdx.x == 0){
+      for(int i = 0; i < BITS/32; i++){
+        printf("%u ", buffer->_limbs[i]);
+      }
+      printf("\n");
+    }
+  }
+  inline __device__ void print(env_t& bn_env, cgbn_mem_t<BITS>* buffer){
+    if(threadIdx.x== 0)
+    printf("mont:\n");
+    print_array(bn_env, mont, buffer);
+    if(threadIdx.x== 0)
+    printf("modulus:\n");
+    print_array(bn_env, modulus, buffer);
+    if(threadIdx.x== 0)
+    printf("inv: %lu \n\n", inv, buffer);
+  }
 };
 
 
@@ -86,12 +106,15 @@ struct DevAltBn128G1{
   __device__ void load(env_t& bn_env, alt_bn128_g1& a, const int offset){
     cgbn_load(bn_env, x.mont, a.x.mont_repr_data + offset);
     cgbn_load(bn_env, x.modulus, a.x.modulus_data + offset);
+    x.inv = a.x.inv;
 
     cgbn_load(bn_env, y.mont, a.y.mont_repr_data + offset);
     cgbn_load(bn_env, y.modulus, a.y.modulus_data + offset);
+    y.inv = a.y.inv;
 
     cgbn_load(bn_env, z.mont, a.z.mont_repr_data + offset);
     cgbn_load(bn_env, z.modulus, a.z.modulus_data + offset);
+    z.inv = a.z.inv;
   }
   __device__ void store(env_t& bn_env, alt_bn128_g1& a, const int offset){
     cgbn_store(bn_env, a.x.mont_repr_data + offset, x.mont);
@@ -191,6 +214,7 @@ __global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g
   cgbn_mem_t<BITS>* buffer = tmp_buffer + instance;
   env_t::cgbn_t tmax_value;
   cgbn_load(bn_env, tmax_value, max_value);
+
 
   //z1=squared(a.z)
   DevFp Z1 = dev_a.z.squared(bn_env, res, buffer);
