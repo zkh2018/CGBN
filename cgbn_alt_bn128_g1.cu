@@ -25,6 +25,16 @@ void alt_bn128_g1::init_host(const int count){
   y.init_host(count);
   z.init_host(count);
 }
+void alt_bn128_g1::release(){
+  x.release();
+  y.release();
+  z.release();
+}
+void alt_bn128_g1::release_host(){
+  x.release_host();
+  y.release_host();
+  z.release_host();
+}
 void alt_bn128_g1::copy_from_cpu(const alt_bn128_g1& g1){
   x.copy_from_cpu(g1.x);
   y.copy_from_cpu(g1.y);
@@ -87,6 +97,16 @@ struct DevFp{
       printf("\n");
     }
   }
+  inline __device__ void print_array_64(env_t& bn_env, env_t::cgbn_t& data, cgbn_mem_t<BITS>* buffer){
+    cgbn_store(bn_env, buffer, data);
+    if(threadIdx.x == 0){
+      uint64_t *p = (uint64_t*)buffer->_limbs;
+      for(int i = 0; i < BITS/64; i++){
+        printf("%lu ", p[i]);
+      }
+      printf("\n");
+    }
+  }
   inline __device__ void print(env_t& bn_env, cgbn_mem_t<BITS>* buffer){
     if(threadIdx.x== 0)
     printf("mont:\n");
@@ -94,6 +114,16 @@ struct DevFp{
     if(threadIdx.x== 0)
     printf("modulus:\n");
     print_array(bn_env, modulus, buffer);
+    if(threadIdx.x== 0)
+    printf("inv: %lu \n\n", inv, buffer);
+  }
+  inline __device__ void print_64(env_t& bn_env, cgbn_mem_t<BITS>* buffer){
+    if(threadIdx.x== 0)
+    printf("mont:\n");
+    print_array_64(bn_env, mont, buffer);
+    if(threadIdx.x== 0)
+    printf("modulus:\n");
+    print_array_64(bn_env, modulus, buffer);
     if(threadIdx.x== 0)
     printf("inv: %lu \n\n", inv, buffer);
   }
@@ -119,22 +149,28 @@ struct DevAltBn128G1{
   __device__ void store(env_t& bn_env, alt_bn128_g1& a, const int offset){
     cgbn_store(bn_env, a.x.mont_repr_data + offset, x.mont);
     cgbn_store(bn_env, a.x.modulus_data + offset, x.modulus);
+    a.x.inv = x.inv;
 
     cgbn_store(bn_env, a.y.mont_repr_data + offset, y.mont);
     cgbn_store(bn_env, a.y.modulus_data + offset, y.modulus);
+    a.y.inv = y.inv;
 
     cgbn_store(bn_env, a.z.mont_repr_data + offset, z.mont);
     cgbn_store(bn_env, a.z.modulus_data + offset, z.modulus);
+    a.z.inv = z.inv;
   }
   __device__ void store(env_t& bn_env, DevFp& x_, DevFp& y_, DevFp& z_, alt_bn128_g1& a, const int offset){
     cgbn_store(bn_env, a.x.mont_repr_data + offset, x_.mont);
     cgbn_store(bn_env, a.x.modulus_data + offset, x_.modulus);
+    a.x.inv = x_.inv;
 
     cgbn_store(bn_env, a.y.mont_repr_data + offset, y_.mont);
     cgbn_store(bn_env, a.y.modulus_data + offset, y_.modulus);
+    a.y.inv = y_.inv;
 
     cgbn_store(bn_env, a.z.mont_repr_data + offset, z_.mont);
     cgbn_store(bn_env, a.z.modulus_data + offset, z_.modulus);
+    a.z.inv = z_.inv;
   }
 
   inline __device__ bool is_zero(env_t& bn_env){
@@ -188,7 +224,7 @@ struct DevAltBn128G1{
   }
 };
 
-__global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, uint32_t *tmp_res, cgbn_mem_t<BITS>* tmp_buffer, cgbn_mem_t<BITS>* max_value){
+__global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, uint32_t *tmp_res, cgbn_mem_t<BITS>* tmp_buffer, cgbn_mem_t<BITS>* max_value, bool debug){
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int instance = tid / TPI;
   if(instance >= count) return;
@@ -218,6 +254,9 @@ __global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g
 
   //z1=squared(a.z)
   DevFp Z1 = dev_a.z.squared(bn_env, res, buffer);
+  if(debug){
+    Z1.print_64(bn_env, tmp_buffer);
+  }
   //z2=squared(b.z)
   DevFp Z2 = dev_b.z.squared(bn_env, res, buffer);
   //u1=a.x * z2
@@ -233,7 +272,10 @@ __global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g
   //s2 = b.y * z1_cubed
   DevFp S2 = dev_b.y.mul(bn_env, Z1_cubed, res, buffer);
   //if(u1 == u2) reutrn a.db1()
-  if(U1.isequal(bn_env, U2)){
+  if(U1.isequal(bn_env, U2) && S1.isequal(bn_env, S2)){
+    if(threadIdx.x == 0){
+      printf("dev dbl....\n");
+    }
     dev_a.dbl(bn_env, c, tmp_res, tmp_buffer, tmax_value, instance);
     return;
   }
@@ -273,7 +315,7 @@ __global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g
   dev_a.store(bn_env, X3, Y3, Z3, c, instance);
 }
 
-int alt_bn128_g1_add(alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, uint32_t *tmp_res, cgbn_mem_t<BITS>* tmp_buffer, cgbn_mem_t<BITS>* max_value){
+int alt_bn128_g1_add(alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, uint32_t *tmp_res, cgbn_mem_t<BITS>* tmp_buffer, cgbn_mem_t<BITS>* max_value, bool debug){
   cgbn_error_report_t *report;
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
 
@@ -281,7 +323,7 @@ int alt_bn128_g1_add(alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint3
   uint32_t threads = instances * TPI;
   uint32_t blocks = (count + instances - 1) / instances;
 
-  kernel_alt_bn128_g1_add<<<blocks, threads>>>(report, a, b, c, count, tmp_res, tmp_buffer, max_value);
+  kernel_alt_bn128_g1_add<<<blocks, threads>>>(report, a, b, c, count, tmp_res, tmp_buffer, max_value, debug);
 
   CUDA_CHECK(cudaDeviceSynchronize());
   CGBN_CHECK(report);

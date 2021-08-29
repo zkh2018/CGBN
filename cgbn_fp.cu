@@ -27,6 +27,15 @@ void Fp_model::init_host(const int count){
   mont_repr_data = (cgbn_mem_t<BITS>*)malloc(count * sizeof(cgbn_mem_t<BITS>));
   modulus_data = (cgbn_mem_t<BITS>*)malloc(count * sizeof(cgbn_mem_t<BITS>));
 }
+void Fp_model::release(){
+  gpu_free(mont_repr_data);
+  gpu_free(modulus_data);
+}
+void Fp_model::release_host(){
+  free(mont_repr_data);
+  free(modulus_data);
+}
+
 void Fp_model::copy_from_cpu(const Fp_model& fp){
   copy_cpu_to_gpu(mont_repr_data, fp.mont_repr_data, sizeof(cgbn_mem_t<BITS>) * _count);
   copy_cpu_to_gpu(modulus_data, fp.modulus_data, sizeof(cgbn_mem_t<BITS>) * _count);

@@ -91,11 +91,24 @@ struct Fp{
     }
     printf("\n");
   }
+  void print_ui64(mp_limb_t *array){
+    for(int i = 0; i < N; i++){
+      printf("%lu ", array[i]);
+    }
+    printf("\n");
+  }
   void print(){
     printf("mont: \n");
     print_ui32(mont);
     printf("modulus: \n");
     print_ui32(modulus);
+    printf("inv: %lu\n\n", inv);
+  }
+  void print_ui64(){
+    printf("mont: \n");
+    print_ui64(mont);
+    printf("modulus: \n");
+    print_ui64(modulus);
     printf("inv: %lu\n\n", inv);
   }
 };
@@ -107,6 +120,10 @@ struct AltBn128G1{
   }
 
   AltBn128G1 dbl(){
+    if(is_zero()){
+      return *this;
+    }
+
     Fp A = x.squared();
     Fp B = y.squared();
     Fp C = B.squared();
@@ -149,7 +166,8 @@ struct AltBn128G1{
     Fp Z2_cubed = other.z.mul(Z2);
     Fp S1 = y.mul(Z2_cubed);
     Fp S2 = other.y.mul(Z1_cubed);
-    if(U1.isequal(U2)){
+
+    if(U1.isequal(U2) && S1.isequal(S2)){
       return dbl();
     }
     Fp H = U2.sub(U1);
@@ -186,6 +204,52 @@ struct AltBn128G1{
     x.rand_init();
     y.rand_init();
     z.rand_init();
+  }
+  void init_a(){
+    mp_limb_t x_mont[BITS/64] = {10635073041846494731u, 18385197196700739644u, 8847835663514441480u, 1691939150287291782u};
+    mp_limb_t x_modulus[BITS/64] = {4332616871279656263u, 10917124144477883021u, 13281191951274694749u, 3486998266802970665u};
+    
+    mp_limb_t y_mont[BITS/64] = {15231017389912311329u, 5016431550731635077u, 8941756931650430670u, 1423108634455529116u};
+    mp_limb_t y_modulus[BITS/64] = {4332616871279656263u, 10917124144477883021u, 13281191951274694749u, 3486998266802970665u};
+
+    mp_limb_t z_mont[BITS/64] = {15230403791020821917u, 754611498739239741u, 7381016538464732716u, 1011752739694698287u};
+    mp_limb_t z_modulus[BITS/64] = {4332616871279656263u, 10917124144477883021u, 13281191951274694749u, 3486998266802970665u};
+
+    const size_t size = BITS/64 * sizeof(mp_limb_t);
+    memcpy(x.mont, x_mont, size);
+    memcpy(x.modulus, x_modulus, size);
+    x.inv = 0;
+
+    memcpy(y.mont, y_mont, size);
+    memcpy(y.modulus, y_modulus, size);
+    y.inv = 0;
+    
+    memcpy(z.mont, z_mont, size);
+    memcpy(z.modulus, z_modulus, size);
+    z.inv = 0;
+  }
+  void init_b(){
+    mp_limb_t x_mont[BITS/64] = {9870344786918826698u, 16706809717572462584u, 8162712831543794517u, 354779194311042116u};
+    mp_limb_t x_modulus[BITS/64] = {4332616871279656263u, 10917124144477883021u, 13281191951274694749u, 3486998266802970665u};
+
+    mp_limb_t y_mont[BITS/64] = {12006604663029098484u, 7700291543686466839u, 1525725619814363843u, 2854626384676222931u};
+    mp_limb_t y_modulus[BITS/64] = {4332616871279656263u, 10917124144477883021u, 13281191951274694749u, 3486998266802970665u};
+
+    mp_limb_t z_mont[BITS/64] = {15230403791020821917u, 754611498739239741u, 7381016538464732716u, 1011752739694698287u};
+    mp_limb_t z_modulus[BITS/64] = {4332616871279656263u, 10917124144477883021u, 13281191951274694749u, 3486998266802970665u};
+
+    const size_t size = BITS/64 * sizeof(mp_limb_t);
+    memcpy(x.mont, x_mont, size);
+    memcpy(x.modulus, x_modulus, size);
+    x.inv = 0;
+
+    memcpy(y.mont, y_mont, size);
+    memcpy(y.modulus, y_modulus, size);
+    y.inv = 0;
+    
+    memcpy(z.mont, z_mont, size);
+    memcpy(z.modulus, z_modulus, size);
+    z.inv = 0;
   }
   void print(){
     printf("x:\n");
@@ -245,7 +309,7 @@ void run_gpu(AltBn128G1& a, AltBn128G1& b, AltBn128G1& c){
     max_value.ptr->_limbs[i] = 0xffffffff;
   }
   dmax_value.copy_from_host(max_value);
-  alt_bn128_g1_add(da, db, dc, data_num, gpu_res, tmp_buffer.ptr, dmax_value.ptr);
+  alt_bn128_g1_add(da, db, dc, data_num, gpu_res, tmp_buffer.ptr, dmax_value.ptr, false);
   copy_back(c, dc);
 
 }
@@ -253,8 +317,10 @@ void run_gpu(AltBn128G1& a, AltBn128G1& b, AltBn128G1& c){
 void test(){
   AltBn128G1 a, b, c, gpu_c;
   srand((unsigned)time(0));
-  a.rand_init();
-  b.rand_init();
+  //a.rand_init();
+  //b.rand_init();
+  a.init_a();
+  b.init_b();
   c = a.add(b);
  // printf("a:\n");
  // a.print();
