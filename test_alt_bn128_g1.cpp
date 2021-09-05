@@ -12,6 +12,20 @@ const int N = BITS/64;
 struct Fp{
   mp_limb_t mont[N], modulus[N];
   uint64_t inv;
+  void set_zero(){
+    memset(mont, 0, sizeof(mp_limb_t) * N);
+    memset(modulus, 0, sizeof(mp_limb_t) * N);
+    inv = 0;
+  }
+  void set_one(){
+    set_zero();
+    mont[0] = 1;
+    for(int i = 0; i < N; i++){
+      modulus[i] = i;
+    }
+    inv = 1000;
+  }
+
   Fp mul(const Fp& other){
     mp_limb_t res[2*N];
     mpn_mul_n(res, mont, other.mont, N);
@@ -66,7 +80,7 @@ struct Fp{
     for(int i = 0; i < N; i++){
       if(mont[i]) return false;
     }
-    return 0;
+    return true;
   }
   bool isequal(Fp& other){
     return (mpn_cmp(mont, other.mont, N) == 0);
@@ -82,7 +96,8 @@ struct Fp{
       mont[i] = rand();
       modulus[i] = rand();
     }
-    inv = rand();
+    //inv = rand();
+    inv = 1000;
   }
   void print_ui32(mp_limb_t *array){
     uint32_t *p = (uint32_t*)array;
@@ -115,8 +130,42 @@ struct Fp{
 
 struct AltBn128G1{
   Fp x, y, z;
+  void set_zero(){
+    x.set_zero();
+    y.set_one();
+    z.set_zero();
+  }
+  void set_one(){
+    x.set_one();
+    y.set_one();
+    z.set_one();
+  }
   bool is_zero(){
     return z.is_zero();
+  }
+  bool is_equal(AltBn128G1& other){
+    if(is_zero()){
+      return other.is_zero();
+    }
+    if(other.is_zero()){
+      return false;
+    }
+
+    Fp Z1 = z.squared();
+    Fp Z2 = other.z.squared();
+    Fp XZ2 = x.mul(Z2);
+    Fp XZ1 = other.x.mul(Z1);
+    if(!XZ2.isequal(XZ1)){
+      return false;
+    }
+    Fp Z1_cubed = z.mul(Z1);
+    Fp Z2_cubed = other.z.mul(Z2);
+    Fp YZ2 = y.mul(Z2_cubed);
+    Fp YZ1 = other.y.mul(Z1_cubed);
+    if(!YZ2.isequal(YZ1)){
+      return false;
+    }
+    return true;
   }
 
   AltBn128G1 dbl(){
@@ -261,32 +310,51 @@ struct AltBn128G1{
   }
 };
 
-void copy(AltBn128G1& a, alt_bn128_g1& da){
-  copy_cpu_to_gpu(da.x.mont_repr_data, a.x.mont, sizeof(a.x.mont));
-  copy_cpu_to_gpu(da.x.modulus_data, a.x.modulus, sizeof(a.x.modulus));
+void copy(AltBn128G1& a, alt_bn128_g1& da, const int offset = 0){
+  copy_cpu_to_gpu(da.x.mont_repr_data + offset, a.x.mont, sizeof(a.x.mont));
+  copy_cpu_to_gpu(da.x.modulus_data + offset, a.x.modulus, sizeof(a.x.modulus));
   da.x.inv = a.x.inv;
 
-  copy_cpu_to_gpu(da.y.mont_repr_data, a.y.mont, sizeof(a.y.mont));
-  copy_cpu_to_gpu(da.y.modulus_data, a.y.modulus, sizeof(a.y.modulus));
+  copy_cpu_to_gpu(da.y.mont_repr_data + offset, a.y.mont, sizeof(a.y.mont));
+  copy_cpu_to_gpu(da.y.modulus_data + offset, a.y.modulus, sizeof(a.y.modulus));
   da.y.inv = a.y.inv;
 
-  copy_cpu_to_gpu(da.z.mont_repr_data, a.z.mont, sizeof(a.z.mont));
-  copy_cpu_to_gpu(da.z.modulus_data, a.z.modulus, sizeof(a.z.modulus));
+  copy_cpu_to_gpu(da.z.mont_repr_data + offset, a.z.mont, sizeof(a.z.mont));
+  copy_cpu_to_gpu(da.z.modulus_data + offset, a.z.modulus, sizeof(a.z.modulus));
   da.z.inv = a.z.inv;
 }
 
-void copy_back(AltBn128G1& a, alt_bn128_g1& da){
-  copy_gpu_to_cpu(a.x.mont, da.x.mont_repr_data, sizeof(a.x.mont));
-  copy_gpu_to_cpu(a.x.modulus, da.x.modulus_data, sizeof(a.x.modulus));
-  a.x.inv = da.x.inv;
+void copy_back(AltBn128G1& a, alt_bn128_g1& da, const int offset = 0){
+  copy_gpu_to_cpu(a.x.mont, da.x.mont_repr_data + offset, sizeof(a.x.mont));
+  copy_gpu_to_cpu(a.x.modulus, da.x.modulus_data + offset, sizeof(a.x.modulus));
+  //a.x.inv = da.x.inv;
 
-  copy_gpu_to_cpu(a.y.mont, da.y.mont_repr_data, sizeof(a.y.mont));
-  copy_gpu_to_cpu(a.y.modulus, da.y.modulus_data, sizeof(a.y.modulus));
-  a.x.inv = da.x.inv;
+  copy_gpu_to_cpu(a.y.mont, da.y.mont_repr_data + offset, sizeof(a.y.mont));
+  copy_gpu_to_cpu(a.y.modulus, da.y.modulus_data + offset, sizeof(a.y.modulus));
+  //a.x.inv = da.x.inv;
 
-  copy_gpu_to_cpu(a.z.mont, da.z.mont_repr_data, sizeof(a.z.mont));
-  copy_gpu_to_cpu(a.z.modulus, da.z.modulus_data, sizeof(a.z.modulus));
-  a.z.inv = da.z.inv;
+  copy_gpu_to_cpu(a.z.mont, da.z.mont_repr_data + offset, sizeof(a.z.mont));
+  copy_gpu_to_cpu(a.z.modulus, da.z.modulus_data + offset, sizeof(a.z.modulus));
+  //a.z.inv = da.z.inv;
+}
+
+void reduce_sum(AltBn128G1* values, AltBn128G1* scalar_start, const int*index_it, AltBn128G1* partial, uint32_t *counters, const uint32_t ranges_size, const int* firsts, const int* seconds, AltBn128G1& zero, AltBn128G1& one){
+  for(int j = 0; j < ranges_size; j++){
+    AltBn128G1 result ;
+    result.set_zero();
+    int count = 0;
+    for(int i = firsts[j]; i < seconds[j]; i++){
+      auto& scale = scalar_start[index_it[i]];
+      if(scale.is_equal(zero)){
+      }else if(scale.is_equal(one)){
+        result = result.add(values[i]); 
+      }else{
+        count += 1;
+      }
+    }
+    partial[j] = result;
+    counters[j] = count;
+  }
 }
 
 void run_gpu(AltBn128G1& a, AltBn128G1& b, AltBn128G1& c){
@@ -309,7 +377,7 @@ void run_gpu(AltBn128G1& a, AltBn128G1& b, AltBn128G1& c){
     max_value.ptr->_limbs[i] = 0xffffffff;
   }
   dmax_value.copy_from_host(max_value);
-  alt_bn128_g1_add(da, db, dc, data_num, gpu_res, tmp_buffer.ptr, dmax_value.ptr, false);
+  alt_bn128_g1_add(da, db, dc, data_num, gpu_res, tmp_buffer.ptr, dmax_value.ptr);
   copy_back(c, dc);
 
 }
@@ -317,27 +385,119 @@ void run_gpu(AltBn128G1& a, AltBn128G1& b, AltBn128G1& c){
 void test(){
   AltBn128G1 a, b, c, gpu_c;
   srand((unsigned)time(0));
-  //a.rand_init();
-  //b.rand_init();
   a.init_a();
   b.init_b();
   c = a.add(b);
- // printf("a:\n");
- // a.print();
- // printf("b:\n");
- // b.print();
- // printf("c:\n");
- // c.print();
 
   run_gpu(a, b, gpu_c);
- // printf("gpu c:\n");
- // gpu_c.print();
  int cmp_ret = memcmp(c.x.mont, gpu_c.x.mont, sizeof(c.x.mont));
  printf("compare result = %d\n", cmp_ret);
 }
 
+void run_gpu_reduce_sum(AltBn128G1* values, AltBn128G1* scalar_start, const int*index_it, AltBn128G1* partial, uint32_t *counters, const uint32_t ranges_size, const int* firsts, const int* seconds, AltBn128G1& zero, AltBn128G1& one, const int step){
+  alt_bn128_g1 d_values, d_scalar_start, d_partial, d_zero, d_one;
+  const int data_num = ranges_size;
+  d_values.init(step * ranges_size);
+  d_scalar_start.init(step * ranges_size);
+  d_partial.init(data_num);
+  d_zero.init(1);
+  d_one.init(1);
+
+  for(int i = 0; i < step * ranges_size; i++){
+    copy(scalar_start[i], d_scalar_start, i);
+    copy(values[i], d_values, i);
+  }
+  copy(zero, d_zero);
+  copy(one, d_one);
+
+  uint32_t *gpu_res, *d_counters;
+  int* d_index_it, *d_firsts, *d_seconds;
+  gpu_malloc((void**)&gpu_res, data_num * BITS/32*3 * sizeof(uint32_t));
+  gpu_malloc((void**)&d_counters, ranges_size  * sizeof(uint32_t));
+  gpu_malloc((void**)&d_index_it, step * ranges_size  * sizeof(uint32_t));
+  gpu_malloc((void**)&d_firsts, ranges_size  * sizeof(uint32_t));
+  gpu_malloc((void**)&d_seconds, ranges_size  * sizeof(uint32_t));
+  gpu_buffer tmp_buffer, max_value, dmax_value;
+  tmp_buffer.resize(data_num);
+  max_value.resize_host(1);
+  dmax_value.resize(1);
+  for(int i = 0; i < BITS/32; i++){
+    max_value.ptr->_limbs[i] = 0xffffffff;
+  }
+  dmax_value.copy_from_host(max_value);
+  copy_cpu_to_gpu(d_index_it, index_it, sizeof(int) * step * ranges_size);
+  copy_cpu_to_gpu(d_firsts, firsts, sizeof(int) * ranges_size);
+  copy_cpu_to_gpu(d_seconds, seconds, sizeof(int) * ranges_size);
+  clock_t start = clock();
+  alt_bn128_g1_reduce_sum(
+      d_values, 
+      d_scalar_start, 
+      d_index_it, 
+      d_partial, 
+      d_counters, 
+      ranges_size, 
+      d_firsts, d_seconds, 
+      gpu_res, tmp_buffer.ptr, dmax_value.ptr, d_zero, d_one);
+  clock_t end = clock();
+  printf("gpu kernel times: %fms\n", (double)(end-start)*1000.0 / CLOCKS_PER_SEC);
+  for(int i = 0; i < ranges_size; i++){
+    copy_back(partial[i], d_partial, i);
+  }
+  copy_gpu_to_cpu(counters, d_counters, ranges_size * sizeof(int));
+}
+
+void test_reduce_sum(){
+  const int ranges_size = 30130;
+  const int step = 16;
+  printf("ranges_size = %d, reduce depth=%d\n", ranges_size, step);
+  AltBn128G1 *values, *scalar_start, *partial, *partial2, zero, one;
+  srand((unsigned)time(0));
+  int* index_it;
+  uint32_t *counters = new uint32_t[ranges_size];
+  uint32_t *counters2 = new uint32_t[ranges_size];
+  int* firsts = new int[ranges_size];
+  int *seconds = new int[ranges_size];
+  //values = new AltBn128G1[ranges_size];
+  partial = new AltBn128G1[ranges_size];
+  partial2 = new AltBn128G1[ranges_size];
+  for(int i = 0; i < ranges_size; i++){
+    firsts[i] = step * i;
+    seconds[i] = step * (i+1);
+  }
+  index_it = new int[step * ranges_size];
+  values = new AltBn128G1[step * ranges_size];
+  scalar_start = new AltBn128G1[step * ranges_size];
+  for(int i = 0; i < step * ranges_size; i++){
+    index_it[i] = i;
+    values[i].rand_init();
+    scalar_start[i].rand_init();
+    if(i % 2 == 0){
+      scalar_start[i].set_one();
+    }
+  }
+  zero.set_zero();
+  one.set_one();
+
+  clock_t start = clock(); 
+  reduce_sum(values, scalar_start, index_it, partial, counters, ranges_size, firsts, seconds, zero, one);
+  clock_t end = clock(); 
+  printf("cpu times: %fms\n", (double)(end-start)*1000.0 / CLOCKS_PER_SEC);
+  
+  run_gpu_reduce_sum(values, scalar_start, index_it, partial2, counters2, ranges_size, firsts, seconds, zero, one, step);
+  //int cmp_counter = memcmp(counters, counters2, ranges_size * sizeof(int));
+  //printf("compare counters = %d\n", cmp_counter);
+  for(int i = 0; i < ranges_size; i++){
+    if(memcmp(partial[i].x.mont, partial2[i].x.mont, 32)){
+      printf("the first different partial is %d\n ", i);
+      return;
+    }
+  }
+  printf("compare partial success\n");
+}
+
 int main(){
-  test();
+  //test();
+  test_reduce_sum();
   return 0;
 }
 
