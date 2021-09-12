@@ -470,7 +470,7 @@ void run_gpu_reduce_sum(AltBn128G1* values, Fp* scalar_start, const size_t*index
   copy_cpu_to_gpu(d_firsts, firsts, sizeof(int) * ranges_size);
   copy_cpu_to_gpu(d_seconds, seconds, sizeof(int) * ranges_size);
   clock_t start = clock();
-  alt_bn128_g1_reduce_sum(
+  alt_bn128_g1_reduce_sum_opt(
       d_values, 
       d_scalars, 
       d_index_it, 

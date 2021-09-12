@@ -459,11 +459,126 @@ __global__ void kernel_alt_bn128_g1_reduce_sum(
       //a.store(bn_env, bn_exponents, i);
       count += 1;
     }
-  }
-  result.store(bn_env, partial, instance);
+  }  result.store(bn_env, partial, instance);
   const int group_thread = threadIdx.x & (TPI-1);
   if(group_thread == 0)
     counters[instance] = count;
+}
+
+__global__ void kernel_alt_bn128_g1_reduce_sum_opt(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 values, 
+    Fp_model scalars,
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    uint32_t* counters, 
+    const int ranges_size, 
+    const uint32_t *firsts,
+    const uint32_t *seconds,
+    uint32_t *tmp_res,
+    cgbn_mem_t<BITS>* tmp_buffer,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    alt_bn128_g1 t_one,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents
+    ){
+  int range = blockIdx.x;
+  int tid = threadIdx.x;
+  int first = firsts[range];
+  int second = seconds[range];
+  int reduce_depth = second - first;
+  int instance = tid / TPI;
+  int instances = blockDim.x / TPI;
+  if(instance >= reduce_depth) return;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  const int n = BITS / 32;
+  uint32_t *res = tmp_res + range * instances * 3 * n + instance * 3 * n;
+  cgbn_mem_t<BITS>* buffer = tmp_buffer + range * instances + instance;
+  env_t::cgbn_t tmax_value;
+  cgbn_load(bn_env, tmax_value, max_value);
+
+  DevAltBn128G1 dev_t_zero, dev_t_one;
+  DevFp dev_field_zero, dev_field_one;
+  dev_t_zero.load(bn_env, t_zero, 0);
+  dev_t_one.load(bn_env, t_one, 0);
+  dev_field_zero.load(bn_env, field_zero, 0);
+  dev_field_one.load(bn_env, field_one, 0);
+
+  DevAltBn128G1 result;
+  result.copy_from(bn_env, dev_t_zero);
+  int count = 0;
+  for(int i = instance + first; i < second; i += instances){
+    const int j = index_it[i];
+    DevFp scalar;
+    scalar.load(bn_env, scalars, j);
+    if(scalar.isequal(bn_env, dev_field_zero)){
+    }
+    else if(scalar.isequal(bn_env, dev_field_one)){
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, values, i);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, tmax_value);
+    }
+    else{
+      const int group_thread = threadIdx.x & (TPI-1);
+      if(group_thread == 0){
+        density[i] = 1;
+      }
+      //DevFp a = scalar.as_bigint(bn_env, res, buffer);
+      //a.store(bn_env, bn_exponents, i);
+      count += 1;
+    }
+  }
+  result.store(bn_env, partial, range * instances + instance);
+  //__shared__ DevAltBn128G1 cache[max_threads_per_block];
+  __shared__ int cache_count[max_threads_per_block];
+  //cache[instance].copy_from(bn_env, result);
+  const int group_thread = threadIdx.x & (TPI-1);
+  if(group_thread == 0)
+    cache_count[instance] = count;
+  __syncthreads();
+  //cache[instance].store(bn_env, partial, range * instances + instance);
+
+  //int tmp_n = instances/2;
+  //while(tmp_n){
+  //  if(instance < tmp_n){
+  //    DevAltBn128G1 dev_a, dev_b;
+  //    dev_a.load(bn_env, partial, range * instances + instance);
+  //    dev_b.load(bn_env, partial, range * instances + instance + tmp_n);
+  //    dev_alt_bn128_g1_add(bn_env, dev_a, dev_b, &dev_a, res, buffer, tmax_value);
+  //    dev_a.store(bn_env, partial, range * instances + instance);
+  //    if(group_thread == 0)
+  //      cache_count[instance] += cache_count[instance + tmp_n];
+  //  }
+  //  tmp_n /= 2;
+  //  __syncthreads();
+  //}
+  //if(tid == 0)
+  //  counters[range] = cache_count[0];
+  if(instance == 0){
+    DevAltBn128G1 result;
+    result.copy_from(bn_env, dev_t_zero);
+    int count = 0;
+    for(int i = 0; i < instances; i++){
+      //cache[0] += cache[i];
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, partial, range * instances + i);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, tmax_value);
+      //dev_alt_bn128_g1_add(bn_env, cache[0], cache[i], &cache[0], res, buffer, tmax_value);
+      if(tid == 0){
+        count += cache_count[i];
+      }
+    }
+    //cache[0].store(bn_env, partial, range);
+    result.store(bn_env, partial, range * instances);
+    if(tid == 0)
+      counters[range] = count;
+  }
 }
 
 int alt_bn128_g1_add(alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, uint32_t *tmp_res, cgbn_mem_t<BITS>* tmp_buffer, cgbn_mem_t<BITS>* max_value){
@@ -514,4 +629,37 @@ int alt_bn128_g1_reduce_sum(
   CUDA_CHECK(cgbn_error_report_free(report));
   return 0;
 }
+
+int alt_bn128_g1_reduce_sum_opt(
+    alt_bn128_g1 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    uint32_t *counters,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    const uint32_t *seconds,
+    uint32_t *tmp_res, 
+    cgbn_mem_t<BITS>* tmp_buffer, 
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    alt_bn128_g1 t_one,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents){
+  cgbn_error_report_t *report;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+
+  uint32_t threads = 512;
+  uint32_t blocks =  ranges_size;
+
+  kernel_alt_bn128_g1_reduce_sum_opt<<<blocks, threads>>>(report, values, scalars, index_it, partial, counters, ranges_size, firsts, seconds, tmp_res, tmp_buffer, max_value, t_zero, t_one, field_zero, field_one, density, bn_exponents);
+
+  CUDA_CHECK(cudaDeviceSynchronize());
+  CGBN_CHECK(report);
+  CUDA_CHECK(cgbn_error_report_free(report));
+  return 0;
+}
+
 }

@@ -39,6 +39,25 @@ int alt_bn128_g1_reduce_sum(
     cgbn_mem_t<BITS>* bn_exponents
     );
 
+int alt_bn128_g1_reduce_sum_opt(
+    alt_bn128_g1 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    uint32_t *counters,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    const uint32_t *seconds,
+    uint32_t *tmp_res, 
+    cgbn_mem_t<BITS>* tmp_buffer, 
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    alt_bn128_g1 t_one,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents
+    );
 } //gpu
 
 #endif
