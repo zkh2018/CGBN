@@ -109,6 +109,23 @@ struct DevFp{
     return ret;
   }
 
+  inline __device__ void load(env_t& bn_env, const Fp_model& a, const int offset){
+    cgbn_load(bn_env, mont, a.mont_repr_data + offset);
+    cgbn_load(bn_env, modulus, a.modulus_data + offset);
+    inv = a.inv;
+  }
+  inline __device__ void store(env_t& bn_env, cgbn_mem_t<BITS>* a, const int offset){
+    cgbn_store(bn_env, a + offset, mont);
+  }
+  inline __device__ DevFp as_bigint(env_t& bn_env, uint32_t *res, cgbn_mem_t<BITS>* buffer){
+    DevFp y;
+    y.copy_from(bn_env, *this);
+    DevFp one;
+    one.set_zero(bn_env);
+    one.set_one(bn_env);
+    return y.mul(bn_env, one, res, buffer);
+  }
+
   inline __device__ void print_array(env_t& bn_env, env_t::cgbn_t& data, cgbn_mem_t<BITS>* buffer){
     cgbn_store(bn_env, buffer, data);
     if(threadIdx.x == 0){
@@ -384,18 +401,23 @@ __global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g
 __global__ void kernel_alt_bn128_g1_reduce_sum(
     cgbn_error_report_t* report, 
     alt_bn128_g1 values, 
-    alt_bn128_g1 scalar_start,
-    const int *index_it,
+    Fp_model scalars,
+    const size_t *index_it,
     alt_bn128_g1 partial, 
     uint32_t* counters, 
     const int ranges_size, 
-    const int *firsts,
-    const int *seconds,
+    const uint32_t *firsts,
+    const uint32_t *seconds,
     uint32_t *tmp_res,
     cgbn_mem_t<BITS>* tmp_buffer,
     cgbn_mem_t<BITS>* max_value,
-    alt_bn128_g1 zero,
-    alt_bn128_g1 one){
+    alt_bn128_g1 t_zero,
+    alt_bn128_g1 t_one,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents
+    ){
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int instance = tid / TPI;
   if(instance >= ranges_size) return;
@@ -409,25 +431,32 @@ __global__ void kernel_alt_bn128_g1_reduce_sum(
   env_t::cgbn_t tmax_value;
   cgbn_load(bn_env, tmax_value, max_value);
 
-
-  DevAltBn128G1 result, dev_zero, dev_one;
-  dev_zero.load(bn_env, zero, 0);
-  dev_one.load(bn_env, one, 0);
-  result.copy_from(bn_env, dev_zero);
+  DevAltBn128G1 result, dev_t_zero, dev_t_one;
+  DevFp dev_field_zero, dev_field_one;
+  dev_t_zero.load(bn_env, t_zero, 0);
+  dev_t_one.load(bn_env, t_one, 0);
+  dev_field_zero.load(bn_env, field_zero, 0);
+  dev_field_one.load(bn_env, field_one, 0);
+  result.copy_from(bn_env, dev_t_zero);
   int count = 0;
   for(int i = firsts[instance]; i < seconds[instance]; i++){
     const int j = index_it[i];
-    //const filet scalar = scalar_start[j];
-    DevAltBn128G1 scalar;
-    scalar.load(bn_env, scalar_start, j);
-    if(scalar.is_equal(bn_env, dev_zero, res, buffer)){
+    DevFp scalar;
+    scalar.load(bn_env, scalars, j);
+    if(scalar.isequal(bn_env, dev_field_zero)){
     }
-    else if(scalar.is_equal(bn_env, dev_one, res, buffer)){
+    else if(scalar.isequal(bn_env, dev_field_one)){
       DevAltBn128G1 dev_b;
       dev_b.load(bn_env, values, i);
       dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, tmax_value);
     }
     else{
+      const int group_thread = threadIdx.x & (TPI-1);
+      if(group_thread == 0){
+        density[i] = 1;
+      }
+      //DevFp a = scalar.as_bigint(bn_env, res, buffer);
+      //a.store(bn_env, bn_exponents, i);
       count += 1;
     }
   }
@@ -455,18 +484,22 @@ int alt_bn128_g1_add(alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint3
 
 int alt_bn128_g1_reduce_sum(
     alt_bn128_g1 values, 
-    alt_bn128_g1 scalar_start, 
-    const int *index_it,
+    Fp_model scalars, 
+    const size_t *index_it,
     alt_bn128_g1 partial, 
     uint32_t *counters,
     const uint32_t ranges_size,
-    const int *firsts,
-    const int *seconds,
+    const uint32_t *firsts,
+    const uint32_t *seconds,
     uint32_t *tmp_res, 
     cgbn_mem_t<BITS>* tmp_buffer, 
     cgbn_mem_t<BITS>* max_value,
-    alt_bn128_g1 zero,
-    alt_bn128_g1 one){
+    alt_bn128_g1 t_zero,
+    alt_bn128_g1 t_one,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents){
   cgbn_error_report_t *report;
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
 
@@ -474,7 +507,7 @@ int alt_bn128_g1_reduce_sum(
   uint32_t threads = instances * TPI;
   uint32_t blocks = (ranges_size + instances - 1) / instances;
 
-  kernel_alt_bn128_g1_reduce_sum<<<blocks, threads>>>(report, values, scalar_start, index_it, partial, counters, ranges_size, firsts, seconds, tmp_res, tmp_buffer, max_value, zero, one);
+  kernel_alt_bn128_g1_reduce_sum<<<blocks, threads>>>(report, values, scalars, index_it, partial, counters, ranges_size, firsts, seconds, tmp_res, tmp_buffer, max_value, t_zero, t_one, field_zero, field_one, density, bn_exponents);
 
   CUDA_CHECK(cudaDeviceSynchronize());
   CGBN_CHECK(report);

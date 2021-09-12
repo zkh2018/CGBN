@@ -15,7 +15,7 @@ namespace gpu{
 #define TPI 8
 typedef cgbn_context_t<TPI> context_t;
 typedef cgbn_env_t<context_t, BITS> env_t;
-#define max_threads_per_block  (1024/TPI)
+#define max_threads_per_block  (512/TPI)
 
 inline __device__ void device_fp_add(env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
   env_t::cgbn_t tin1, tin2, tmodule_data, tscratch;
