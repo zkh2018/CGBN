@@ -426,7 +426,9 @@ __global__ void kernel_alt_bn128_g1_reduce_sum(
   env_t          bn_env(bn_context.env<env_t>());  
 
   const int n = BITS / 32;
-  uint32_t *res = tmp_res + instance * 3 * n;
+  //uint32_t *res = tmp_res + instance * 3 * n;
+  __shared__ uint32_t cache[64 * 3 * BITS/32];
+  uint32_t *res = &cache[instance * 3 * n];
   cgbn_mem_t<BITS>* buffer = tmp_buffer + instance;
   env_t::cgbn_t tmax_value;
   cgbn_load(bn_env, tmax_value, max_value);
@@ -464,6 +466,94 @@ __global__ void kernel_alt_bn128_g1_reduce_sum(
   const int group_thread = threadIdx.x & (TPI-1);
   if(group_thread == 0)
     counters[instance] = count;
+}
+
+__global__ void kernel_alt_bn128_g1_reduce_sum_one_range(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 values, 
+    Fp_model scalars,
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    uint32_t* counters, 
+    const int ranges_size, 
+    const uint32_t* firsts,
+    const uint32_t* seconds,
+    uint32_t *tmp_res,
+    cgbn_mem_t<BITS>* tmp_buffer,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    //alt_bn128_g1 t_one,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents
+    ){
+  int local_instance = threadIdx.x / TPI;//0~63
+  int local_instances = blockDim.x / 8;//64
+  int instance = blockIdx.x * local_instances + local_instance;
+
+  int range_offset = blockIdx.y * gridDim.x * local_instances;
+  int first = firsts[blockIdx.y];
+  int second = seconds[blockIdx.y];
+  int reduce_depth = second - first;//30130
+
+  context_t bn_context(cgbn_report_monitor, report, range_offset + instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  const int n = BITS / 32;
+  //__shared__ uint32_t cache_res[64 * 3 * BITS/32];
+  //uint32_t *res = &cache_res[local_instance * 3 * n];
+  uint32_t *res = tmp_res + (range_offset + instance) * 3 * n;
+  cgbn_mem_t<BITS>* buffer = tmp_buffer + range_offset + instance;
+  env_t::cgbn_t tmax_value;
+  cgbn_load(bn_env, tmax_value, max_value);
+
+  DevAltBn128G1 result, dev_t_zero;
+  DevFp dev_field_zero, dev_field_one;
+  dev_t_zero.load(bn_env, t_zero, 0);
+  dev_field_zero.load(bn_env, field_zero, 0);
+  dev_field_one.load(bn_env, field_one, 0);
+  result.copy_from(bn_env, dev_t_zero);
+  int count = 0;
+  for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * local_instances){
+    const int j = index_it[i];
+    DevFp scalar;
+    scalar.load(bn_env, scalars, j);
+    if(scalar.isequal(bn_env, dev_field_zero)){
+    }
+    else if(scalar.isequal(bn_env, dev_field_one)){
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, values, i);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, tmax_value);
+    }
+    else{
+      const int group_thread = threadIdx.x & (TPI-1);
+      if(group_thread == 0){
+        density[i] = 1;
+      }
+      count += 1;
+    }
+  }
+  result.store(bn_env, partial, range_offset + instance);
+  __shared__ int cache_counters[64];
+  const int group_thread = threadIdx.x & (TPI-1);
+  if(group_thread == 0)
+    cache_counters[local_instance] = count;
+  __syncthreads();
+  if(local_instance == 0){
+    //result.copy_from(bn_env, dev_t_zero);
+    //count = 0;
+    for(int i = 1; i < local_instances; i++){
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, partial, range_offset + instance + i);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, tmax_value);
+      count += cache_counters[i];
+    }
+    result.store(bn_env, partial, range_offset + instance);
+    if(group_thread == 0){
+      counters[blockIdx.y * gridDim.x + blockIdx.x] = count;
+    }
+  }
 }
 
 int alt_bn128_g1_add(alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, uint32_t *tmp_res, cgbn_mem_t<BITS>* tmp_buffer, cgbn_mem_t<BITS>* max_value){
@@ -507,9 +597,64 @@ int alt_bn128_g1_reduce_sum(
   uint32_t threads = instances * TPI;
   uint32_t blocks = (ranges_size + instances - 1) / instances;
 
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start, 0);
   kernel_alt_bn128_g1_reduce_sum<<<blocks, threads>>>(report, values, scalars, index_it, partial, counters, ranges_size, firsts, seconds, tmp_res, tmp_buffer, max_value, t_zero, t_one, field_zero, field_one, density, bn_exponents);
 
   CUDA_CHECK(cudaDeviceSynchronize());
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(start); 
+  cudaEventSynchronize(stop);   
+  float costtime;
+  cudaEventElapsedTime(&costtime, start, stop);
+  printf("kernel time = %fms\n", costtime);
+  CGBN_CHECK(report);
+  CUDA_CHECK(cgbn_error_report_free(report));
+  return 0;
+}
+
+int alt_bn128_g1_reduce_sum_one_range(
+    alt_bn128_g1 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    uint32_t *counters,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    const uint32_t *seconds,
+    uint32_t *tmp_res, 
+    cgbn_mem_t<BITS>* tmp_buffer, 
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    alt_bn128_g1 t_one,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents){
+  cgbn_error_report_t *report;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+
+  uint32_t threads = 512;
+  const int reduce_depth = 30130;//second - first;
+  const int local_instances = 64 * BlockDepth;
+  uint32_t block_x =  (reduce_depth + local_instances - 1) / local_instances;
+  dim3 blocks(block_x, ranges_size, 1);
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start, 0);
+  kernel_alt_bn128_g1_reduce_sum_one_range<<<blocks, threads>>>(report, values, scalars, index_it, partial, counters, ranges_size, firsts, seconds, tmp_res, tmp_buffer, max_value, t_zero, field_zero, field_one, density, bn_exponents);
+
+  CUDA_CHECK(cudaDeviceSynchronize());
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(start); 
+  cudaEventSynchronize(stop);   
+  float costtime;
+  cudaEventElapsedTime(&costtime, start, stop);
+  printf("kernel time = %fms\n", costtime);
   CGBN_CHECK(report);
   CUDA_CHECK(cgbn_error_report_free(report));
   return 0;
