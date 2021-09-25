@@ -20,29 +20,29 @@ Fp_model::Fp_model(const int count){
 void Fp_model::init(const int count){
   _count = count;
   gpu_malloc((void**)&mont_repr_data, count * sizeof(cgbn_mem_t<BITS>));
-  gpu_malloc((void**)&modulus_data, count * sizeof(cgbn_mem_t<BITS>));
+  //gpu_malloc((void**)&modulus_data, count * sizeof(cgbn_mem_t<BITS>));
 }
 void Fp_model::init_host(const int count){
   _count = count;
   mont_repr_data = (cgbn_mem_t<BITS>*)malloc(count * sizeof(cgbn_mem_t<BITS>));
-  modulus_data = (cgbn_mem_t<BITS>*)malloc(count * sizeof(cgbn_mem_t<BITS>));
+  //modulus_data = (cgbn_mem_t<BITS>*)malloc(count * sizeof(cgbn_mem_t<BITS>));
 }
 void Fp_model::release(){
   gpu_free(mont_repr_data);
-  gpu_free(modulus_data);
+  //gpu_free(modulus_data);
 }
 void Fp_model::release_host(){
   free(mont_repr_data);
-  free(modulus_data);
+  //free(modulus_data);
 }
 
 void Fp_model::copy_from_cpu(const Fp_model& fp){
   copy_cpu_to_gpu(mont_repr_data, fp.mont_repr_data, sizeof(cgbn_mem_t<BITS>) * _count);
-  copy_cpu_to_gpu(modulus_data, fp.modulus_data, sizeof(cgbn_mem_t<BITS>) * _count);
+  //copy_cpu_to_gpu(modulus_data, fp.modulus_data, sizeof(cgbn_mem_t<BITS>) * _count);
 }
 void Fp_model::copy_to_cpu(Fp_model& fp){
   copy_gpu_to_cpu(fp.mont_repr_data, mont_repr_data, sizeof(cgbn_mem_t<BITS>) * _count);
-  copy_gpu_to_cpu(fp.modulus_data, modulus_data, sizeof(cgbn_mem_t<BITS>) * _count);
+  //copy_gpu_to_cpu(fp.modulus_data, modulus_data, sizeof(cgbn_mem_t<BITS>) * _count);
 }
 
 __global__ void kernel_fp_add(cgbn_error_report_t* report, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count){

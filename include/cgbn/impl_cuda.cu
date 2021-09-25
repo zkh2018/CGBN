@@ -254,6 +254,10 @@ template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
 __device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::set_ui32(cgbn_t &r, const uint32_t value) const {
   cgbn::core_t<cgbn_env_t>::set_ui32(r._limbs, value);
 }
+template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
+__device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::set_ui32(cgbn_t &r, const uint32_t value, const uint32_t value2) const {
+  cgbn::core_t<cgbn_env_t>::set_ui32(r._limbs, value, value2);
+}
 
 template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
 __device__ __forceinline__ int32_t cgbn_env_t<context_t, bits, syncable>::add_ui32(cgbn_t &r, const cgbn_t &a, const uint32_t add) const {

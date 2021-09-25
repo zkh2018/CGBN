@@ -8,6 +8,7 @@
 #include "cgbn/cgbn_mem.h"
 
 const int BITS=256;
+#define BlockDepth 64
 
 namespace gpu{
 

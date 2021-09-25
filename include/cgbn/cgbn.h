@@ -181,6 +181,10 @@ template<class env_t>
 __host__ __device__ __forceinline__ void cgbn_set_ui32(env_t env, typename env_t::cgbn_t &r, const uint32_t value) {
   env.set_ui32(r, value);
 }
+template<class env_t>
+__host__ __device__ __forceinline__ void cgbn_set_ui32(env_t env, typename env_t::cgbn_t &r, const uint32_t value, const uint32_t value2) {
+  env.set_ui32(r, value, value2);
+}
 
 template<class env_t>
 __host__ __device__ __forceinline__ int32_t cgbn_add_ui32(env_t env, typename env_t::cgbn_t &r, const typename env_t::cgbn_t &a, const uint32_t add) {
