@@ -216,6 +216,7 @@ class core_t {
   /* UI32 ROUTINES */
   __device__ __forceinline__ static uint32_t get_ui32(const uint32_t a[LIMBS]);
   __device__ __forceinline__ static void     set_ui32(uint32_t r[LIMBS], const uint32_t value);
+  __device__ __forceinline__ static void     set_ui32(uint32_t r[LIMBS], const uint32_t value, const uint32_t value2);
   __device__ __forceinline__ static int32_t  add_ui32(uint32_t r[LIMBS], const uint32_t a[LIMBS], const uint32_t add);
   __device__ __forceinline__ static int32_t  sub_ui32(uint32_t r[LIMBS], const uint32_t a[LIMBS], const uint32_t sub);
   __device__ __forceinline__ static uint32_t mul_ui32(uint32_t r[LIMBS], const uint32_t a[LIMBS], const uint32_t mul);

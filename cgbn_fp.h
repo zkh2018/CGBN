@@ -7,14 +7,14 @@ namespace gpu{
 
 struct Fp_model {
   cgbn_mem_t<BITS>* mont_repr_data;
-  cgbn_mem_t<BITS>* modulus_data;
-  uint64_t inv;
+  //cgbn_mem_t<BITS>* modulus_data;
+  //uint64_t inv;
   int _count;
 
   Fp_model(){
     _count = 0;
     mont_repr_data = nullptr;
-    modulus_data = nullptr;
+    //modulus_data = nullptr;
   }
   Fp_model(const int count);
   void init(const int count);

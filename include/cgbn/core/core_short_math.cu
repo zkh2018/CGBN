@@ -40,6 +40,16 @@ __device__ __forceinline__ void core_t<env>::set_ui32(uint32_t r[LIMBS], const u
   for(int32_t index=1;index<LIMBS;index++)
     r[index]=0;
 }
+template<class env> 
+__device__ __forceinline__ void core_t<env>::set_ui32(uint32_t r[LIMBS], const uint32_t value, const uint32_t value2) {
+  uint32_t group_thread=threadIdx.x & TPI-1;
+
+  r[0]=(group_thread==0) ? value : 0;
+  r[0]=(group_thread==1) ? value2 : 0;
+  #pragma unroll
+  for(int32_t index=1;index<LIMBS;index++)
+    r[index]=0;
+}
 
 template<class env>
 __device__ __forceinline__ int32_t core_t<env>::add_ui32(uint32_t r[LIMBS], const uint32_t a[LIMBS], const uint32_t add) {

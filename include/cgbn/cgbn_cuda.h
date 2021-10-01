@@ -169,6 +169,7 @@ class cgbn_env_t {
   /* ui32 arithmetic routines*/
   __device__ __forceinline__ uint32_t   get_ui32(const cgbn_t &a) const;
   __device__ __forceinline__ void       set_ui32(cgbn_t &r, const uint32_t value) const;
+  __device__ __forceinline__ void       set_ui32(cgbn_t &r, const uint32_t value, const uint32_t value2) const;
   __device__ __forceinline__ int32_t    add_ui32(cgbn_t &r, const cgbn_t &a, const uint32_t add) const;
   __device__ __forceinline__ int32_t    sub_ui32(cgbn_t &r, const cgbn_t &a, const uint32_t sub) const;
   __device__ __forceinline__ uint32_t   mul_ui32(cgbn_t &r, const cgbn_t &a, const uint32_t mul) const;

@@ -13,12 +13,12 @@ pick:
 	@echo
 
 lib:
-	nvcc -arch=sm_60 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples
-	nvcc -arch=sm_60 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu -lib -o libcgbn_math.a -I./include -I./samples
+	nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples
+	nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu -lib -o libcgbn_math.a -I./include -I./samples
 
 test: lib test.cpp
-	g++ test.cpp -o test -lcgbn_math -lcudart -lgmp -L./ -L/usr/local/cuda/lib64/ -I/usr/local/cuda/include -Iinclude/ -Isamples -I./
-	g++ test_alt_bn128_g1.cpp -o test_alt_bn128_g1 -lcgbn_math -lcudart -lgmp -L./ -L/usr/local/cuda/lib64/ -I/usr/local/cuda/include -Iinclude/ -Isamples -I./
+	g++ -O3 test.cpp -o test -lcgbn_math -lcudart -lgmp -L./ -L/usr/local/cuda/lib64/ -I/usr/local/cuda/include -Iinclude/ -Isamples -I./
+	g++ -O3 test_alt_bn128_g1.cpp -o test_alt_bn128_g1 -lcgbn_math -lcudart -lgmp -L./ -L/usr/local/cuda/lib64/ -I/usr/local/cuda/include -Iinclude/ -Isamples -I./
 
 clean:
 	make -C samples clean
