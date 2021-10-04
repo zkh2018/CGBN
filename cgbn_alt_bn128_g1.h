@@ -15,6 +15,7 @@ struct alt_bn128_g1{
   void release_host();
   void copy_from_cpu(const alt_bn128_g1& g1);
   void copy_to_cpu(alt_bn128_g1& g1);
+  void clear();
 };
 
 int alt_bn128_g1_add(alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, cgbn_mem_t<BITS>* max_value, cgbn_mem_t<BITS>* modulus, const uint64_t inv);
@@ -67,6 +68,13 @@ void alt_bn128_g1_reduce_sum(
     alt_bn128_g1 t_zero,
     cgbn_mem_t<BITS>* modulus, const uint64_t inv,
     const int max_reduce_depth);
+
+void alt_bn128_g1_reduce_sum(
+    alt_bn128_g1 data, 
+    alt_bn128_g1 out, 
+    const uint32_t n,
+    cgbn_mem_t<BITS>* max_value,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv);
 
 void alt_bn128_g1_reduce_sum_one_instance(
     alt_bn128_g1 partial_in, 

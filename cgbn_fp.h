@@ -23,6 +23,7 @@ struct Fp_model {
   void release_host();
   void copy_from_cpu(const Fp_model& fp);
   void copy_to_cpu(Fp_model& fp);
+  void clear();
 };
 
 int fp_add(cgbn_mem_t<BITS>* in1, cgbn_mem_t<BITS>* in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count);

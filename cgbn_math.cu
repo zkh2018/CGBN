@@ -17,6 +17,9 @@ void gpu_malloc(void** ptr, size_t size){
   CUDA_CHECK(cudaMalloc(ptr, size));
   CUDA_CHECK(cudaMemset(*ptr, 0, size));
 }
+void gpu_set_zero(void* ptr, size_t size){
+  CUDA_CHECK(cudaMemset(ptr, 0, size));
+}
 void gpu_free(void* ptr){
   CUDA_CHECK(cudaFree(ptr));
 }

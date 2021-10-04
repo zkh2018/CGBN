@@ -45,6 +45,10 @@ void Fp_model::copy_to_cpu(Fp_model& fp){
   //copy_gpu_to_cpu(fp.modulus_data, modulus_data, sizeof(cgbn_mem_t<BITS>) * _count);
 }
 
+void Fp_model::clear(){
+  gpu_set_zero(this->mont_repr_data, _count * sizeof(cgbn_mem_t<BITS>));
+}
+
 __global__ void kernel_fp_add(cgbn_error_report_t* report, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value, const uint32_t count){
   int instance = (blockIdx.x*blockDim.x + threadIdx.x)/TPI;
   if(instance >= count) return;

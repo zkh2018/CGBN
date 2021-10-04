@@ -13,6 +13,7 @@ const int BITS=256;
 namespace gpu{
 
 void gpu_malloc(void** ptr, size_t size);
+void gpu_set_zero(void* ptr, size_t size);
 void gpu_free(void*ptr);
 void copy_cpu_to_gpu(void* dst, const void* src, size_t size);
 void copy_gpu_to_cpu(void* dst, const void* src, size_t size);
