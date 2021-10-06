@@ -5,6 +5,8 @@
 #include <thrust/scan.h>
 #include <thrust/execution_policy.h>
 
+#include <time.h>
+
 namespace gpu{
 
   __device__ size_t dev_get_id(const size_t c, const size_t bitno, uint64_t* data){
@@ -115,6 +117,140 @@ namespace gpu{
       result.store(bn_env, buckets, bid * instances);
     }
   }
+  
+  template<int left, int right>
+  __global__ void kernel_get_bucket(
+      int *starts, int *ends,
+      int *out_starts, int *out_ends, int* out_ids,
+      int *num,
+      int bucket_num
+      ){
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int i = tid; i < bucket_num; i+=gridDim.x * blockDim.x){
+      int start = starts[i];
+      int end = ends[i];
+      int len = end-start;
+      if(len > left && len <= right){
+        int index = atomicAdd(num, 1);
+        out_starts[index] = start;
+        out_ends[index] = end;
+        out_ids[index] = i;
+      }
+    }
+  }
+
+  template<int Offset>
+  __global__ void kernel_one_bucket_reduce_sum(
+      alt_bn128_g1 data,
+      int* starts, int* ids,
+      alt_bn128_g1 buckets,
+      const int bucket_num){
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    for(int i = tid; i < bucket_num; i+=gridDim.x * blockDim.x){
+      int bid = ids[i];
+      int start = starts[i];
+      for(int j = 0; j < 4; j++){
+        ((uint64_t*)buckets.x.mont_repr_data[bid * Offset]._limbs)[j] = ((uint64_t*)data.x.mont_repr_data[start]._limbs)[j];
+        ((uint64_t*)buckets.y.mont_repr_data[bid * Offset]._limbs)[j] = ((uint64_t*)data.y.mont_repr_data[start]._limbs)[j];
+        ((uint64_t*)buckets.z.mont_repr_data[bid * Offset]._limbs)[j] = ((uint64_t*)data.z.mont_repr_data[start]._limbs)[j];
+      }
+    }
+
+  }
+  template<int BS, int Offset>
+  __global__ void kernel_little_bucket_reduce_sum(
+      cgbn_error_report_t* report, 
+      alt_bn128_g1 data,
+      int* starts, int* ends, int* ids,
+      alt_bn128_g1 buckets,
+      const int bucket_num,
+      cgbn_mem_t<BITS>* max_value,
+      alt_bn128_g1 t_zero,
+      cgbn_mem_t<BITS>* modulus, const uint64_t inv){
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int instance = tid / TPI;
+    if(instance >= bucket_num) return;
+    int local_instance = threadIdx.x / TPI;
+    int real_bid = ids[instance];
+    int start = starts[instance];
+    int n = ends[instance] - start;
+
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache_res[BS * 24];
+    uint32_t *res = &cache_res[local_instance * 24];
+    __shared__ uint32_t cache_buffer[BS * 8];
+    uint32_t *buffer = &cache_buffer[local_instance * 8];
+
+    env_t::cgbn_t local_max_value, local_modulus;
+    cgbn_load(bn_env, local_max_value, max_value);
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    DevAltBn128G1 result;
+    result.load(bn_env, data, start);
+    for(int i = 1; i < n; i++){
+      int j = start + i;
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, data, j);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+    }
+    result.store(bn_env, buckets, real_bid * Offset);
+  }
+
+  template<int BS, int Offset>
+  __global__ void kernel_large_bucket_reduce_sum(
+      cgbn_error_report_t* report, 
+      alt_bn128_g1 data,
+      int* starts, int* ends, int* ids,
+      alt_bn128_g1 buckets,
+      cgbn_mem_t<BITS>* max_value,
+      alt_bn128_g1 t_zero,
+      cgbn_mem_t<BITS>* modulus, const uint64_t inv){
+    int bid = blockIdx.x;
+    int real_bid = ids[bid];
+
+    int start = starts[bid];
+    int n = ends[bid] - start;
+    if(n <= 0) return;
+
+    int tid = threadIdx.x;
+    int instance = tid / TPI;
+    int instances = blockDim.x / TPI;
+
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache_res[BS * 24];
+    uint32_t *res = &cache_res[instance * 24];
+    __shared__ uint32_t cache_buffer[BS * 8];
+    uint32_t *buffer = &cache_buffer[instance * 8];
+
+    env_t::cgbn_t local_max_value, local_modulus;
+    cgbn_load(bn_env, local_max_value, max_value);
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    DevAltBn128G1 result;
+    result.load(bn_env, t_zero, 0);
+    for(int i = instance; i < n; i += instances){
+      int j = start + i;
+      DevAltBn128G1 dev_b;
+      if(i == instance){
+        result.load(bn_env, data, j);
+      }else{
+        dev_b.load(bn_env, data, j);
+        dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+      }
+    }
+    result.store(bn_env, buckets, real_bid * Offset + instance);
+    __syncthreads();
+    if(instance == 0){
+      for(int i = 1; i < instances; i++){
+        DevAltBn128G1 dev_b;
+        dev_b.load(bn_env, buckets, real_bid * Offset + i);
+        dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+      }
+      result.store(bn_env, buckets, real_bid * Offset);
+    }
+  }
 
   __global__ void kernel_reverse(alt_bn128_g1 data, alt_bn128_g1 out, int n, int offset){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -168,7 +304,7 @@ namespace gpu{
     __syncthreads();
   }
 
-  template<int Instances, bool SaveBlockSum>
+  template<int Instances, int RealInstances, bool SaveBlockSum>
   __global__ void kernel_prefix_sum(
       cgbn_error_report_t* report, 
       alt_bn128_g1 data, 
@@ -184,15 +320,15 @@ namespace gpu{
 
     context_t bn_context(cgbn_report_monitor, report, instance);
     env_t          bn_env(bn_context.env<env_t>());  
-    __shared__ uint32_t cache_res[Instances * 24];
+    __shared__ uint32_t cache_res[RealInstances * 24];
     uint32_t *res = &cache_res[local_instance * 24];
-    __shared__ uint32_t cache_buffer[Instances * 8];
+    __shared__ uint32_t cache_buffer[RealInstances * 8];
     uint32_t *buffer = &cache_buffer[local_instance * 8];
     env_t::cgbn_t local_max_value, local_modulus;
     cgbn_load(bn_env, local_max_value, max_value);
     cgbn_load(bn_env, local_modulus, modulus);
     int offset = blockIdx.x * local_instances;
-    for(int stride = 1; stride <= Instances; stride *= 2){
+    for(int stride = 1; stride <= RealInstances; stride *= 2){
       __syncthreads();
       int index = (local_instance+1)*stride*2 - 1; 
       if(index < Instances && index < n){
@@ -204,7 +340,7 @@ namespace gpu{
       }
       __syncthreads();
     }
-    for (unsigned int stride = Instances/2; stride > 0 ; stride /= 2) {
+    for (unsigned int stride = (Instances >> 1); stride > 0 ; stride>>=1) {
       __syncthreads();
       int index = (local_instance+1)*stride*2 - 1;
       if(index + stride < Instances && index + stride < n){
@@ -289,7 +425,7 @@ namespace gpu{
 
   void bucket_reduce_sum(
       alt_bn128_g1 data,
-      int* starts, int* ends,
+      int* starts, int* ends, int* ids,
       alt_bn128_g1 buckets,
       const int bucket_num,
       cgbn_mem_t<BITS>* max_value,
@@ -297,9 +433,45 @@ namespace gpu{
       cgbn_mem_t<BITS>* modulus, const uint64_t inv,
       CudaStream stream){
     cgbn_error_report_t *report = get_error_report();
-    const int threads = 128;
-    const int blocks = bucket_num;
-    kernel_bucket_reduce_sum<threads / TPI><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, max_value, t_zero, modulus, inv);
+    int one_num = 0, little_num = 0, middle_num = 0, large_num = 0;
+    int *tmp_starts = starts + bucket_num;
+    int *tmp_ends = ends + bucket_num;
+    int *tmp_ids = ids;
+    int *tmp_num = ids + bucket_num;
+    //`cudaMalloc((void**)&tmp_num, sizeof(int));
+
+    cudaMemset(tmp_num, 0, sizeof(int));
+    kernel_get_bucket<0, 1><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
+    cudaMemcpy(&one_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
+
+    int threads = 512;
+    int blocks = (one_num + 511) / 512;
+    kernel_one_bucket_reduce_sum<16><<<blocks, threads>>>(data, tmp_starts, tmp_ids, buckets, one_num);
+
+    cudaMemset(tmp_num, 0, sizeof(int));
+    kernel_get_bucket<1, 4><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
+    cudaMemcpy(&little_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
+
+    const int threads2 = 256;
+    const int local_instances = threads2/TPI;
+    blocks = (little_num + local_instances-1) / local_instances;
+    kernel_little_bucket_reduce_sum<local_instances, 16><<<blocks, threads2, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, little_num, max_value, t_zero, modulus, inv);
+
+    cudaMemset(tmp_num, 0, sizeof(int));
+    kernel_get_bucket<4, 16><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
+    cudaMemcpy(&middle_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
+
+    blocks = (middle_num + local_instances-1) / local_instances;
+    kernel_little_bucket_reduce_sum<local_instances, 16><<<blocks, threads2, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, middle_num, max_value, t_zero, modulus, inv);
+
+    cudaMemset(tmp_num, 0, sizeof(int));
+    kernel_get_bucket<16, 10000000><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
+    cudaMemcpy(&large_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
+
+    kernel_large_bucket_reduce_sum<16, 16><<<large_num, 128, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, max_value, t_zero, modulus, inv);
+    //const int threads = 128;
+    //const int blocks = bucket_num;
+    //kernel_bucket_reduce_sum<threads / TPI><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, max_value, t_zero, modulus, inv);
     //CUDA_CHECK(cudaDeviceSynchronize());
   }
 
@@ -323,9 +495,9 @@ namespace gpu{
     int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
     int prefix_sum_blocks2 = (prefix_sum_blocks + instances-1) / instances;//2^4
 
-    kernel_prefix_sum<64, true><<<prefix_sum_blocks, threads/2, 0, stream>>>(report, data, block_sums, n, max_value, modulus, inv);
-    kernel_prefix_sum<64, true><<<prefix_sum_blocks2, threads/2, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
-    kernel_prefix_sum<16, false><<<1, 128/2, 0, stream>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, max_value, modulus, inv);
+    kernel_prefix_sum<64, 32, true><<<prefix_sum_blocks, threads/2, 0, stream>>>(report, data, block_sums, n, max_value, modulus, inv);
+    kernel_prefix_sum<64, 32, true><<<prefix_sum_blocks2, threads/2, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
+    kernel_prefix_sum<16, 8, false><<<1, 128/2, 0, stream>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, max_value, modulus, inv);
     kernel_add_block_sum<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
     kernel_add_block_sum<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(report, data, block_sums, n, max_value, modulus, inv);
     //CUDA_CHECK(cudaDeviceSynchronize());

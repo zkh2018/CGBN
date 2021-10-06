@@ -24,7 +24,7 @@ namespace gpu{
 
   void bucket_reduce_sum(
       alt_bn128_g1 data,
-      int* starts, int* ends,
+      int* starts, int* ends, int *ids,
       alt_bn128_g1 buckets,
       const int bucket_num,
       cgbn_mem_t<BITS>* max_value,

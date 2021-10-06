@@ -7,23 +7,23 @@ namespace gpu{
 struct DevFp{
   env_t::cgbn_t mont;//, modulus;
   //uint64_t inv;
-  __device__ DevFp zero(env_t& bn_env){
+  inline __device__ DevFp zero(env_t& bn_env){
     DevFp zero;
     cgbn_set_ui32(bn_env, zero.mont, 0);
     return zero;
   }
 
-  __device__ void set_zero(env_t& bn_env){
+  inline __device__ void set_zero(env_t& bn_env){
     cgbn_set_ui32(bn_env, mont, 0);
   }
-  __device__ void set_one(env_t& bn_env){
+  inline __device__ void set_one(env_t& bn_env){
     cgbn_set_ui32(bn_env, mont, 1);
   }
-  __device__ void set_ui32(env_t& bn_env, const uint32_t value){
+  inline __device__ void set_ui32(env_t& bn_env, const uint32_t value){
     cgbn_set_ui32(bn_env, mont,value);
   }
 
-  __device__ void copy_from(env_t& bn_env, const DevFp& other){
+  inline __device__ void copy_from(env_t& bn_env, const DevFp& other){
     //inv = other.inv;
     cgbn_set(bn_env, mont, other.mont);
     //cgbn_set(bn_env, modulus, other.modulus);
@@ -38,16 +38,12 @@ struct DevFp{
   inline __device__ DevFp squared(env_t& bn_env, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
     device_mul_reduce(bn_env, res, mont, mont, modulus, tmp_buffer, inv);
     DevFp ret;
-    //ret.inv = inv;
-    //cgbn_set(bn_env, ret.modulus, modulus);
     cgbn_load(bn_env, ret.mont, res + 8);
     return ret;
   }
   inline __device__ DevFp mul(env_t& bn_env, const DevFp& other, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
     device_mul_reduce(bn_env, res, mont, other.mont, modulus, tmp_buffer, inv);
     DevFp ret;
-    //ret.inv = inv;
-    //cgbn_set(bn_env, ret.modulus, modulus);
     cgbn_load(bn_env, ret.mont, res + 8);
     return ret;
 
@@ -55,22 +51,16 @@ struct DevFp{
   inline __device__ DevFp sub(env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
     DevFp ret;
     device_fp_sub(bn_env, ret.mont, mont, other.mont, modulus, max_value);
-    //cgbn_set(bn_env, ret.modulus, modulus);
-    //ret.inv = inv;
     return ret;
   }
   inline __device__ DevFp add(env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
     DevFp ret;
     device_fp_add(bn_env, ret.mont, mont, other.mont, modulus, max_value);
-    //cgbn_set(bn_env, ret.modulus, modulus);
-    //ret.inv = inv;
     return ret;
   }
 
   inline __device__ void load(env_t& bn_env, const Fp_model& a, const int offset){
     cgbn_load(bn_env, mont, a.mont_repr_data + offset);
-    //cgbn_load(bn_env, modulus, a.modulus_data + offset);
-    //inv = a.inv;
   }
   inline __device__ void store(env_t& bn_env, cgbn_mem_t<BITS>* a, const int offset){
     cgbn_store(bn_env, a + offset, mont);
@@ -119,7 +109,7 @@ struct DevFp{
 struct DevAltBn128G1{
   DevFp x, y, z;
 
-  __device__ void load(env_t& bn_env, alt_bn128_g1& a, const int offset){
+  inline __device__ void load(env_t& bn_env, alt_bn128_g1& a, const int offset){
     cgbn_load(bn_env, x.mont, a.x.mont_repr_data + offset);
     //cgbn_load(bn_env, x.modulus, a.x.modulus_data + offset);
     //x.inv = a.x.inv;
@@ -132,7 +122,7 @@ struct DevAltBn128G1{
     //cgbn_load(bn_env, z.modulus, a.z.modulus_data + offset);
     //z.inv = a.z.inv;
   }
-  __device__ void store(env_t& bn_env, alt_bn128_g1& a, const int offset){
+  inline __device__ void store(env_t& bn_env, alt_bn128_g1& a, const int offset){
     cgbn_store(bn_env, a.x.mont_repr_data + offset, x.mont);
     //cgbn_store(bn_env, a.x.modulus_data + offset, x.modulus);
     //a.x.inv = x.inv;
@@ -145,7 +135,7 @@ struct DevAltBn128G1{
     //cgbn_store(bn_env, a.z.modulus_data + offset, z.modulus);
     //a.z.inv = z.inv;
   }
-  __device__ void store(env_t& bn_env, DevFp& x_, DevFp& y_, DevFp& z_, alt_bn128_g1& a, const int offset){
+  inline __device__ void store(env_t& bn_env, DevFp& x_, DevFp& y_, DevFp& z_, alt_bn128_g1& a, const int offset){
     cgbn_store(bn_env, a.x.mont_repr_data + offset, x_.mont);
     //cgbn_store(bn_env, a.x.modulus_data + offset, x_.modulus);
     //a.x.inv = x_.inv;
@@ -187,17 +177,17 @@ struct DevAltBn128G1{
     return true;
   }
 
-  __device__ void set(env_t& bn_env, const DevFp& x_, const DevFp& y_, const DevFp& z_){
+  inline __device__ void set(env_t& bn_env, const DevFp& x_, const DevFp& y_, const DevFp& z_){
     x.copy_from(bn_env, x_);
     y.copy_from(bn_env, y_);
     z.copy_from(bn_env, z_);
   }
-  __device__ void copy_from(env_t& bn_env, const DevAltBn128G1& other){
+  inline __device__ void copy_from(env_t& bn_env, const DevAltBn128G1& other){
     x.copy_from(bn_env, other.x);
     y.copy_from(bn_env, other.y);
     z.copy_from(bn_env, other.z);
   }
-  __device__ void set_zero(env_t& bn_env){
+  inline __device__ void set_zero(env_t& bn_env){
     x.set_zero(bn_env);
     y.set_one(bn_env);
     z.set_zero(bn_env);
