@@ -92,14 +92,17 @@ namespace gpu{
     cgbn_load(bn_env, local_max_value, max_value);
     cgbn_load(bn_env, local_modulus, modulus);
 
-    DevAltBn128G1 result, dev_t_zero;
-    dev_t_zero.load(bn_env, t_zero, 0);
-    result.copy_from(bn_env, dev_t_zero);
+    DevAltBn128G1 result;
+    result.load(bn_env, t_zero, 0);
     for(int i = instance; i < n; i += instances){
       int j = start + i;
       DevAltBn128G1 dev_b;
-      dev_b.load(bn_env, data, j);
-      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+      if(i == instance){
+        result.load(bn_env, data, j);
+      }else{
+        dev_b.load(bn_env, data, j);
+        dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+      }
     }
     result.store(bn_env, buckets, bid * instances + instance);
     __syncthreads();
@@ -196,15 +199,8 @@ namespace gpu{
         DevAltBn128G1 dev_a, dev_b;
         dev_a.load(bn_env, data, offset + index);
         dev_b.load(bn_env, data, offset + index - stride);
-        //if(offset + index == 1){
-        //  dev_a.x.print(bn_env, buffer);
-        //  dev_b.x.print(bn_env, buffer);
-        //}
         dev_alt_bn128_g1_add(bn_env, dev_a, dev_b, &dev_a, res, buffer, local_max_value, local_modulus, inv);
         dev_a.store(bn_env, data, offset + index);
-        //if(offset + index == 1){
-        //  dev_a.x.print(bn_env, buffer);
-        //}
       }
       __syncthreads();
     }
@@ -263,16 +259,17 @@ namespace gpu{
       const int c, const int k,
       const int data_length,
       const int bucket_nums,
-      int* bucket_counters){
+      int* bucket_counters,
+      CudaStream stream){
     int threads = 512;
     int blocks = (data_length + threads-1) / threads;
-    kernel_bucket_counter<<<blocks, threads>>>(density, bn_exponents, c, k, data_length, bucket_counters);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    kernel_bucket_counter<<<blocks, threads, 0, stream>>>(density, bn_exponents, c, k, data_length, bucket_counters);
+    //CUDA_CHECK(cudaDeviceSynchronize());
   }
 
-  void prefix_sum(const int *in, int *out, const int n){
-    thrust::exclusive_scan(thrust::device, in, in + n, out);
-    CUDA_CHECK(cudaDeviceSynchronize());
+  void prefix_sum(const int *in, int *out, const int n, CudaStream stream){
+    thrust::exclusive_scan(thrust::cuda::par.on(stream), in, in + n, out);
+    //CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   void split_to_bucket(
@@ -282,12 +279,12 @@ namespace gpu{
       const cgbn_mem_t<BITS>* bn_exponents,
       const int c, const int k,
       const int data_length,
-      int *indexs){
+      int *indexs, CudaStream stream){
     int threads = 512;
     int blocks = (data_length + threads-1) / threads;
 
-    kernel_split_to_bucket<<<blocks, threads>>>(data, out, density, bn_exponents, c, k, data_length, indexs);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    kernel_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, density, bn_exponents, c, k, data_length, indexs);
+    //CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   void bucket_reduce_sum(
@@ -297,19 +294,20 @@ namespace gpu{
       const int bucket_num,
       cgbn_mem_t<BITS>* max_value,
       alt_bn128_g1 t_zero,
-      cgbn_mem_t<BITS>* modulus, const uint64_t inv){
+      cgbn_mem_t<BITS>* modulus, const uint64_t inv,
+      CudaStream stream){
     cgbn_error_report_t *report = get_error_report();
     const int threads = 128;
     const int blocks = bucket_num;
-    kernel_bucket_reduce_sum<threads / TPI><<<blocks, threads>>>(report, data, starts, ends, buckets, max_value, t_zero, modulus, inv);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    kernel_bucket_reduce_sum<threads / TPI><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, max_value, t_zero, modulus, inv);
+    //CUDA_CHECK(cudaDeviceSynchronize());
   }
 
-  void reverse(alt_bn128_g1 in, alt_bn128_g1 out, const int n, const int offset){
+  void reverse(alt_bn128_g1 in, alt_bn128_g1 out, const int n, const int offset, CudaStream stream){
     const int threads = 512;
     int reverse_blocks = (n + threads - 1) / threads;
-    kernel_reverse<<<reverse_blocks, threads>>>(in, out, n, offset);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    kernel_reverse<<<reverse_blocks, threads, 0, stream>>>(in, out, n, offset);
+    //CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   void prefix_sum(
@@ -318,18 +316,18 @@ namespace gpu{
       alt_bn128_g1 block_sums2, 
       const int n,//2^16
       cgbn_mem_t<BITS>* max_value,
-      cgbn_mem_t<BITS>* modulus, const uint64_t inv){
+      cgbn_mem_t<BITS>* modulus, const uint64_t inv, CudaStream stream){
     cgbn_error_report_t *report = get_error_report();
     const int threads = 512;
     int instances = threads / TPI;//64
     int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
     int prefix_sum_blocks2 = (prefix_sum_blocks + instances-1) / instances;//2^4
 
-    kernel_prefix_sum<64, true><<<prefix_sum_blocks, threads>>>(report, data, block_sums, n, max_value, modulus, inv);
-    kernel_prefix_sum<64, true><<<prefix_sum_blocks2, threads>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
-    kernel_prefix_sum<16, false><<<1, 128>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, max_value, modulus, inv);
-    kernel_add_block_sum<64><<<prefix_sum_blocks2-1, threads>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
-    kernel_add_block_sum<64><<<prefix_sum_blocks-1, threads>>>(report, data, block_sums, n, max_value, modulus, inv);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    kernel_prefix_sum<64, true><<<prefix_sum_blocks, threads/2, 0, stream>>>(report, data, block_sums, n, max_value, modulus, inv);
+    kernel_prefix_sum<64, true><<<prefix_sum_blocks2, threads/2, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
+    kernel_prefix_sum<16, false><<<1, 128/2, 0, stream>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, max_value, modulus, inv);
+    kernel_add_block_sum<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
+    kernel_add_block_sum<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(report, data, block_sums, n, max_value, modulus, inv);
+    //CUDA_CHECK(cudaDeviceSynchronize());
   }
 }// namespace gpu

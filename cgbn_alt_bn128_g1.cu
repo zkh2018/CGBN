@@ -46,10 +46,10 @@ void alt_bn128_g1::copy_to_cpu(alt_bn128_g1& g1){
   g1.y.copy_from_cpu(y);
   g1.z.copy_from_cpu(z);
 }
-void alt_bn128_g1::clear(){
-  this->x.clear();
-  this->y.clear();
-  this->z.clear();
+void alt_bn128_g1::clear(CudaStream stream ){
+  this->x.clear(stream);
+  this->y.clear(stream);
+  this->z.clear(stream);
 }
 
 __global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, cgbn_mem_t<BITS>* max_value, cgbn_mem_t<BITS>* modulus, const uint64_t inv){
@@ -193,12 +193,12 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range(
   cgbn_load(bn_env, local_modulus, modulus);
   cgbn_load(bn_env, local_field_modulus, field_modulus);
 
-  DevAltBn128G1 result, dev_t_zero;
+  DevAltBn128G1 result;
   DevFp dev_field_zero, dev_field_one;
-  dev_t_zero.load(bn_env, t_zero, 0);
+  result.load(bn_env, t_zero, 0);
   dev_field_zero.load(bn_env, field_zero, 0);
   dev_field_one.load(bn_env, field_one, 0);
-  result.copy_from(bn_env, dev_t_zero);
+  //result.copy_from(bn_env, dev_t_zero);
   int count = 0;
   for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * local_instances){
     const int j = index_it[i];
@@ -275,9 +275,9 @@ __global__ void kernel_alt_bn128_g1_reduce_sum(
   cgbn_load(bn_env, local_max_value, max_value);
   cgbn_load(bn_env, local_modulus, modulus);
 
-  DevAltBn128G1 result, dev_t_zero;
-  dev_t_zero.load(bn_env, t_zero, 0);
-  result.copy_from(bn_env, dev_t_zero);
+  DevAltBn128G1 result;
+  result.load(bn_env, t_zero, 0);
+  //result.copy_from(bn_env, dev_t_zero);
   int count = 0;
   for(int i = 0; i < depth; i++){
     DevAltBn128G1 dev_b;
@@ -514,15 +514,16 @@ void alt_bn128_g1_reduce_sum2(
     alt_bn128_g1 out, 
     const uint32_t n,
     cgbn_mem_t<BITS>* max_value,
-    cgbn_mem_t<BITS>* modulus, const uint64_t inv){
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv, 
+    CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
   uint32_t threads = 512;
   uint32_t local_instances = threads / TPI;//64
   uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
   uint32_t blocks = (n + instances - 1) / instances;
   //kernel_alt_bn128_g1_reduce_sum2<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
-  test<64, 16><<<16, 512>>>(report, data, out, n, max_value, modulus, inv);
-  CUDA_CHECK(cudaDeviceSynchronize());
+  test<64, 16><<<16, 512, 0, stream>>>(report, data, out, n, max_value, modulus, inv);
+  //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 

@@ -7,17 +7,24 @@
 #include <gmp.h>
 #include "cgbn/cgbn_mem.h"
 
+#include <cuda_runtime.h>
+
 const int BITS=256;
 #define BlockDepth 64
 
 namespace gpu{
 
+typedef cudaStream_t CudaStream;
+void create_stream(CudaStream* stream);
+void sync(CudaStream stream);
+
 void gpu_malloc(void** ptr, size_t size);
-void gpu_set_zero(void* ptr, size_t size);
+void gpu_set_zero(void* ptr, size_t size, CudaStream stream = 0);
 void gpu_free(void*ptr);
-void copy_cpu_to_gpu(void* dst, const void* src, size_t size);
-void copy_gpu_to_cpu(void* dst, const void* src, size_t size);
-void copy_gpu_to_gpu(void* dst, const void* src, size_t size);
+void copy_cpu_to_gpu(void* dst, const void* src, size_t size, CudaStream stream = 0);
+void copy_gpu_to_cpu(void* dst, const void* src, size_t size, CudaStream stream = 0);
+void copy_gpu_to_gpu(void* dst, const void* src, size_t size, CudaStream stream = 0);
+
 
 struct gpu_buffer{
   int total_n;
