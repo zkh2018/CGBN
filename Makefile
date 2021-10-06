@@ -14,7 +14,7 @@ pick:
 
 lib:
 	nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu cgbn_multi_exp.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples
-	nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu cgbn_multi_exp.cu -lib -o libcgbn_math.a -I./include -I./samples
+#nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu cgbn_multi_exp.cu -lib -o libcgbn_math.a -I./include -I./samples
 
 test: lib test.cpp
 	g++ -O3 test.cpp -o test -lcgbn_math -lcudart -lgmp -L./ -L/usr/local/cuda/lib64/ -I/usr/local/cuda/include -Iinclude/ -Isamples -I./

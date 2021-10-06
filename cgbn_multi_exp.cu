@@ -104,7 +104,7 @@ namespace gpu{
     result.store(bn_env, buckets, bid * instances + instance);
     __syncthreads();
     if(instance == 0){
-      for(int i = 1; i < instances && i < n; i++){
+      for(int i = 1; i < instances; i++){
         DevAltBn128G1 dev_b;
         dev_b.load(bn_env, buckets, bid * instances + i);
         dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
@@ -135,19 +135,26 @@ namespace gpu{
     for(int stride = 1; stride <= Instances; stride *= 2){
       __syncthreads();
       int index = (local_instance+1)*stride*2 - 1; 
-      if(index < Instances){
+      if(index < Instances && index < n){
         DevAltBn128G1 dev_a, dev_b;
         dev_a.load(bn_env, in, offset + index);
         dev_b.load(bn_env, in, offset + index - stride);
+        if(offset + index == 1){
+          dev_a.x.print(bn_env, buffer);
+          dev_b.x.print(bn_env, buffer);
+        }
         dev_alt_bn128_g1_add(bn_env, dev_a, dev_b, &dev_a, res, buffer, local_max_value, local_modulus, inv);
         dev_a.store(bn_env, in, offset + index);
+        if(offset + index == 1){
+          dev_a.x.print(bn_env, buffer);
+        }
       }
       __syncthreads();
     }
     for (unsigned int stride = Instances/2; stride > 0 ; stride /= 2) {
       __syncthreads();
       int index = (local_instance+1)*stride*2 - 1;
-      if(index < Instances){
+      if(index + stride < Instances && index + stride < n){
         DevAltBn128G1 dev_a, dev_b;
         dev_a.load(bn_env, in, offset + index + stride);
         dev_b.load(bn_env, in, offset + index);
@@ -181,7 +188,38 @@ namespace gpu{
     env_t::cgbn_t local_max_value, local_modulus;
     cgbn_load(bn_env, local_max_value, max_value);
     cgbn_load(bn_env, local_modulus, modulus);
-    dev_prefix_sum(bn_env, data, n, Instances, res, buffer, local_max_value, local_modulus, inv);
+    int offset = blockIdx.x * local_instances;
+    for(int stride = 1; stride <= Instances; stride *= 2){
+      __syncthreads();
+      int index = (local_instance+1)*stride*2 - 1; 
+      if(index < Instances && index < n){
+        DevAltBn128G1 dev_a, dev_b;
+        dev_a.load(bn_env, data, offset + index);
+        dev_b.load(bn_env, data, offset + index - stride);
+        //if(offset + index == 1){
+        //  dev_a.x.print(bn_env, buffer);
+        //  dev_b.x.print(bn_env, buffer);
+        //}
+        dev_alt_bn128_g1_add(bn_env, dev_a, dev_b, &dev_a, res, buffer, local_max_value, local_modulus, inv);
+        dev_a.store(bn_env, data, offset + index);
+        //if(offset + index == 1){
+        //  dev_a.x.print(bn_env, buffer);
+        //}
+      }
+      __syncthreads();
+    }
+    for (unsigned int stride = Instances/2; stride > 0 ; stride /= 2) {
+      __syncthreads();
+      int index = (local_instance+1)*stride*2 - 1;
+      if(index + stride < Instances && index + stride < n){
+        DevAltBn128G1 dev_a, dev_b;
+        dev_a.load(bn_env, data, offset + index + stride);
+        dev_b.load(bn_env, data, offset + index);
+        dev_alt_bn128_g1_add(bn_env, dev_a, dev_b, &dev_a, res, buffer, local_max_value, local_modulus, inv);
+        dev_a.store(bn_env, data, offset + index + stride);
+      }
+    }
+    __syncthreads();
     if(SaveBlockSum && local_instance == 0){
       DevAltBn128G1 dev_a;
       dev_a.load(bn_env, data, blockIdx.x * local_instances + local_instances-1);
@@ -278,7 +316,7 @@ namespace gpu{
       alt_bn128_g1 data, 
       alt_bn128_g1 block_sums, 
       alt_bn128_g1 block_sums2, 
-      const int n,//z^16
+      const int n,//2^16
       cgbn_mem_t<BITS>* max_value,
       cgbn_mem_t<BITS>* modulus, const uint64_t inv){
     cgbn_error_report_t *report = get_error_report();

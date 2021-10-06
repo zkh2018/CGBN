@@ -55,6 +55,7 @@ void alt_bn128_g1::clear(){
 __global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g1 a, alt_bn128_g1 b, alt_bn128_g1 c, const uint32_t count, cgbn_mem_t<BITS>* max_value, cgbn_mem_t<BITS>* modulus, const uint64_t inv){
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int instance = tid / TPI;
+  int local_instance = threadIdx.x / TPI;
   if(instance >= count) return;
 
   context_t bn_context(cgbn_report_monitor, report, instance);
@@ -66,11 +67,11 @@ __global__ void kernel_alt_bn128_g1_add(cgbn_error_report_t* report, alt_bn128_g
 
   //const int n = BITS / 32;
   __shared__ uint32_t cache[64 * 8 * 3];
-  uint32_t *res = &cache[instance * 8 * 3];
+  uint32_t *res = &cache[local_instance * 8 * 3];
   //uint32_t *res = tmp_res + instance * 3 * n;
   //cgbn_mem_t<BITS>* buffer = tmp_buffer + instance;
   __shared__ uint32_t cache_buffer[64 * 8];
-  uint32_t *buffer = &cache_buffer[instance * 8];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
   env_t::cgbn_t local_max_value, local_modulus;
   cgbn_load(bn_env, local_max_value, max_value);
   cgbn_load(bn_env, local_modulus, modulus);
@@ -291,7 +292,7 @@ __global__ void kernel_alt_bn128_g1_reduce_sum(
   }
 }
 
-__global__ void kernel_alt_bn128_g1_reduce_sum(
+__global__ void kernel_alt_bn128_g1_reduce_sum2(
     cgbn_error_report_t* report, 
     alt_bn128_g1 data, 
     alt_bn128_g1 out, 
@@ -309,10 +310,10 @@ __global__ void kernel_alt_bn128_g1_reduce_sum(
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
 
-  __shared__ uint32_t cache_res[64 * 3 * BITS/32];
-  uint32_t *res = &cache_res[local_instance * BITS/32 * 3];
-  __shared__ uint32_t cache_buffer[64 * BITS/32];
-  uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+  __shared__ uint32_t cache_res[64 * 24];
+  uint32_t *res = &cache_res[local_instance * 24];
+  __shared__ uint32_t cache_buffer[64 * 8];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
   env_t::cgbn_t local_max_value, local_modulus;
   cgbn_load(bn_env, local_max_value, max_value);
   cgbn_load(bn_env, local_modulus, modulus);
@@ -469,7 +470,46 @@ void alt_bn128_g1_reduce_sum_one_instance(
   //CGBN_CHECK(report);
 }
 
-void alt_bn128_g1_reduce_sum(
+template<int BlockSize, int BlockNum>
+__global__ void test(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 data, 
+    alt_bn128_g1 out, 
+    int n,
+    cgbn_mem_t<BITS>* max_value,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv
+    ){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  int local_instance = threadIdx.x / TPI;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  DevAltBn128G1 a;
+  a.load(bn_env, data, instance);
+  __shared__ uint32_t cache_buffer[BlockSize*8];
+  __shared__ uint32_t cache_res[BlockSize*24];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
+  uint32_t *res = &cache_res[local_instance * 24];
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+  for(int i = instance + BlockNum*BlockSize; i < n-1; i+=BlockNum*BlockSize){
+    DevAltBn128G1 b;
+    b.load(bn_env, data, i);
+    dev_alt_bn128_g1_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv);
+  }
+  a.store(bn_env, out, instance);
+  __syncthreads();
+  if(local_instance == 0){
+    for(int i = 1; i < BlockSize; i++){
+      DevAltBn128G1 b;
+      b.load(bn_env, out, i);
+      dev_alt_bn128_g1_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv);
+    }
+    a.store(bn_env, out, blockIdx.x);
+  }
+}
+void alt_bn128_g1_reduce_sum2(
     alt_bn128_g1 data, 
     alt_bn128_g1 out, 
     const uint32_t n,
@@ -477,10 +517,11 @@ void alt_bn128_g1_reduce_sum(
     cgbn_mem_t<BITS>* modulus, const uint64_t inv){
   cgbn_error_report_t *report = get_error_report();
   uint32_t threads = 512;
-  uint32_t local_instances = threads / TPI;
+  uint32_t local_instances = threads / TPI;//64
   uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
   uint32_t blocks = (n + instances - 1) / instances;
-  kernel_alt_bn128_g1_reduce_sum<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
+  //kernel_alt_bn128_g1_reduce_sum2<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
+  test<64, 1><<<1, 512>>>(report, data, out, n, max_value, modulus, inv);
   CUDA_CHECK(cudaDeviceSynchronize());
 }
 

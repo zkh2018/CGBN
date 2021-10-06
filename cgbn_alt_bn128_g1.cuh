@@ -106,13 +106,11 @@ struct DevFp{
   inline __device__ void print(env_t& bn_env, uint32_t* buffer){
     int group_tid = threadIdx.x % TPI;
     if(group_tid == 0)
-    printf("mont:\n");
     print_array(bn_env, mont, buffer);
   }
   inline __device__ void print_64(env_t& bn_env, uint32_t* buffer){
     int group_tid = threadIdx.x % TPI;
     if(group_tid == 0)
-    printf("mont:\n");
     print_array_64(bn_env, mont, buffer);
   }
 };

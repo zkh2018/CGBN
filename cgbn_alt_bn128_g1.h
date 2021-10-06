@@ -69,7 +69,7 @@ void alt_bn128_g1_reduce_sum(
     cgbn_mem_t<BITS>* modulus, const uint64_t inv,
     const int max_reduce_depth);
 
-void alt_bn128_g1_reduce_sum(
+void alt_bn128_g1_reduce_sum2(
     alt_bn128_g1 data, 
     alt_bn128_g1 out, 
     const uint32_t n,
