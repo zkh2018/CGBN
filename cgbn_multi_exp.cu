@@ -6,6 +6,7 @@
 #include <thrust/execution_policy.h>
 
 #include <time.h>
+#include <vector>
 
 namespace gpu{
 
@@ -243,7 +244,7 @@ namespace gpu{
     result.store(bn_env, buckets, real_bid * Offset + instance);
     __syncthreads();
     if(instance == 0){
-      for(int i = 1; i < instances; i++){
+      for(int i = 1; i < instances && i < n; i++){
         DevAltBn128G1 dev_b;
         dev_b.load(bn_env, buckets, real_bid * Offset + i);
         dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
@@ -430,6 +431,13 @@ namespace gpu{
     blocks = (little_num + local_instances-1) / local_instances;\
     kernel_little_bucket_reduce_sum<local_instances, 16><<<blocks, threads2, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, little_num, max_value, t_zero, modulus, inv);\
 }
+#define LARGE_BUCKET_REDUCE(left, right, instances){\
+    cudaMemset(tmp_num, 0, sizeof(int));\
+    kernel_get_bucket<left, right><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);\
+    cudaMemcpy(&large_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);\
+    kernel_large_bucket_reduce_sum<instances, 16><<<large_num, instances*8, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, max_value, t_zero, modulus, inv);\
+}
+
   void bucket_reduce_sum(
       alt_bn128_g1 data,
       int* starts, int* ends, int* ids,
@@ -462,21 +470,33 @@ namespace gpu{
     LITTLE_BUCKET_REDUCE(1, 2);
     LITTLE_BUCKET_REDUCE(2, 3);
     LITTLE_BUCKET_REDUCE(3, 4);
+    LITTLE_BUCKET_REDUCE(4, 8);
+    LITTLE_BUCKET_REDUCE(8, 16);
     ///////////////////////////////////////////
 
-    cudaMemset(tmp_num, 0, sizeof(int));
-    kernel_get_bucket<4, 16><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
-    cudaMemcpy(&middle_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
+    //cudaMemset(tmp_num, 0, sizeof(int));
+    //kernel_get_bucket<4, 16><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
+    //cudaMemcpy(&middle_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
 
-    blocks = (middle_num + local_instances-1) / local_instances;
-    kernel_little_bucket_reduce_sum<local_instances, 16><<<blocks, threads2, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, middle_num, max_value, t_zero, modulus, inv);
+    //blocks = (middle_num + local_instances-1) / local_instances;
+    //kernel_little_bucket_reduce_sum<local_instances, 16><<<blocks, threads2, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, middle_num, max_value, t_zero, modulus, inv);
     ///////////////////////////////////////////
 
-    cudaMemset(tmp_num, 0, sizeof(int));
-    kernel_get_bucket<16, 10000000><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
-    cudaMemcpy(&large_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
+    LARGE_BUCKET_REDUCE(16, 32, 8);
+    LARGE_BUCKET_REDUCE(32, 10240000, 16);
+    //cudaMemset(tmp_num, 0, sizeof(int));
+    //kernel_get_bucket<16, 32><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
+    //cudaMemcpy(&large_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
 
-    kernel_large_bucket_reduce_sum<16, 16><<<large_num, 128, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, max_value, t_zero, modulus, inv);
+    //kernel_large_bucket_reduce_sum<8, 16><<<large_num, 64, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, max_value, t_zero, modulus, inv);
+
+    ///////////////////////////////////////////
+    //cudaMemset(tmp_num, 0, sizeof(int));
+    //kernel_get_bucket<32, 10000000><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
+    //cudaMemcpy(&large_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
+
+    //kernel_large_bucket_reduce_sum<16, 16><<<large_num, 128, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, max_value, t_zero, modulus, inv);
+
     //const int threads = 128;
     //const int blocks = bucket_num;
     //kernel_bucket_reduce_sum<threads / TPI><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, max_value, t_zero, modulus, inv);

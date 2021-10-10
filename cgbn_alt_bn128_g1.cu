@@ -493,21 +493,21 @@ __global__ void test(
   env_t::cgbn_t local_max_value, local_modulus;
   cgbn_load(bn_env, local_max_value, max_value);
   cgbn_load(bn_env, local_modulus, modulus);
-  for(int i = instance + BlockNum*BlockSize; i < n-1; i+=BlockNum*BlockSize){
+  for(int i = instance + BlockNum*BlockSize; i < n; i+=BlockNum*BlockSize){
     DevAltBn128G1 b;
     b.load(bn_env, data, i);
     dev_alt_bn128_g1_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv);
   }
   a.store(bn_env, out, instance);
-  __syncthreads();
-  if(local_instance == 0){
-    for(int i = 1; i < BlockSize; i++){
-      DevAltBn128G1 b;
-      b.load(bn_env, out, instance + i);
-      dev_alt_bn128_g1_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv);
-    }
-    a.store(bn_env, out, blockIdx.x);
-  }
+  //__syncthreads();
+  //if(local_instance == 0){
+  //  for(int i = 1; i < BlockSize && i < n; i++){
+  //    DevAltBn128G1 b;
+  //    b.load(bn_env, out, instance + i);
+  //    dev_alt_bn128_g1_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv);
+  //  }
+  //  a.store(bn_env, out, blockIdx.x);
+  //}
 }
 void alt_bn128_g1_reduce_sum2(
     alt_bn128_g1 data, 
@@ -522,7 +522,12 @@ void alt_bn128_g1_reduce_sum2(
   uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
   uint32_t blocks = (n + instances - 1) / instances;
   //kernel_alt_bn128_g1_reduce_sum2<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
-  test<64, 16><<<16, 512, 0, stream>>>(report, data, out, n, max_value, modulus, inv);
+  test<64, 64><<<64, 512, 0, stream>>>(report, data, out, n-1, max_value, modulus, inv);
+  const int tmp_n = 64*64; 
+  test<64, 8><<<8, 512, 0, stream>>>(report, out, data, tmp_n, max_value, modulus, inv);
+  test<16, 4><<<4, 128, 0, stream>>>(report, data, out, 64*8, max_value, modulus, inv);
+  test<8, 1><<<1, 64, 0, stream>>>(report, out, data, 64, max_value, modulus, inv);
+  test<1, 1><<<1, 8, 0, stream>>>(report, data, out, 8, max_value, modulus, inv);
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
