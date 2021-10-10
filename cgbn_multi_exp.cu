@@ -423,6 +423,13 @@ namespace gpu{
     //CUDA_CHECK(cudaDeviceSynchronize());
   }
 
+#define LITTLE_BUCKET_REDUCE(left, right){\
+    cudaMemset(tmp_num, 0, sizeof(int));\
+    kernel_get_bucket<left, right><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);\
+    cudaMemcpy(&little_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);\
+    blocks = (little_num + local_instances-1) / local_instances;\
+    kernel_little_bucket_reduce_sum<local_instances, 16><<<blocks, threads2, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, little_num, max_value, t_zero, modulus, inv);\
+}
   void bucket_reduce_sum(
       alt_bn128_g1 data,
       int* starts, int* ends, int* ids,
@@ -448,14 +455,14 @@ namespace gpu{
     int blocks = (one_num + 511) / 512;
     kernel_one_bucket_reduce_sum<16><<<blocks, threads>>>(data, tmp_starts, tmp_ids, buckets, one_num);
 
-    cudaMemset(tmp_num, 0, sizeof(int));
-    kernel_get_bucket<1, 4><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
-    cudaMemcpy(&little_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
-
+    ///////////////////////////////////////////
     const int threads2 = 256;
     const int local_instances = threads2/TPI;
-    blocks = (little_num + local_instances-1) / local_instances;
-    kernel_little_bucket_reduce_sum<local_instances, 16><<<blocks, threads2, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, little_num, max_value, t_zero, modulus, inv);
+
+    LITTLE_BUCKET_REDUCE(1, 2);
+    LITTLE_BUCKET_REDUCE(2, 3);
+    LITTLE_BUCKET_REDUCE(3, 4);
+    ///////////////////////////////////////////
 
     cudaMemset(tmp_num, 0, sizeof(int));
     kernel_get_bucket<4, 16><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
@@ -463,6 +470,7 @@ namespace gpu{
 
     blocks = (middle_num + local_instances-1) / local_instances;
     kernel_little_bucket_reduce_sum<local_instances, 16><<<blocks, threads2, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, middle_num, max_value, t_zero, modulus, inv);
+    ///////////////////////////////////////////
 
     cudaMemset(tmp_num, 0, sizeof(int));
     kernel_get_bucket<16, 10000000><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
