@@ -45,6 +45,7 @@ int alt_bn128_g1_reduce_sum_one_range(
     const size_t *index_it,
     alt_bn128_g1 partial, 
     uint32_t *counters,
+    char* flags,
     const uint32_t ranges_size,
     const uint32_t *firsts,
     const uint32_t *seconds,

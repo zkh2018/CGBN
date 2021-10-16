@@ -151,23 +151,21 @@ __global__ void kernel_alt_bn128_g1_reduce_sum(
     counters[instance] = count;
 }
 
-__global__ void kernel_alt_bn128_g1_reduce_sum_one_range(
+__global__ void kernel_alt_bn128_g1_reduce_sum_one_range_pre(
     cgbn_error_report_t* report, 
-    alt_bn128_g1 values, 
     Fp_model scalars,
     const size_t *index_it,
-    alt_bn128_g1 partial, 
     uint32_t* counters, 
+    char* flags,
     const int ranges_size, 
     const uint32_t* firsts,
     const uint32_t* seconds,
     cgbn_mem_t<BITS>* max_value,
-    alt_bn128_g1 t_zero,
     Fp_model field_zero,
     Fp_model field_one,
     char *density,
     cgbn_mem_t<BITS>* bn_exponents,
-    cgbn_mem_t<BITS>* modulus, const uint64_t inv,
+    const uint64_t inv,
     cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv
     ){
   int local_instance = threadIdx.x / TPI;//0~63
@@ -184,21 +182,14 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range(
 
   __shared__ uint32_t cache_res[64 * 24];
   uint32_t *res = &cache_res[local_instance * 24];
-  //uint32_t *res = tmp_res + (range_offset + instance) * 3 * n;
-  //cgbn_mem_t<BITS>* buffer = tmp_buffer + range_offset + instance;
   __shared__ uint32_t cache_buffer[512];
   uint32_t *buffer = &cache_buffer[local_instance * 8];
-  env_t::cgbn_t local_max_value, local_modulus, local_field_modulus;
-  cgbn_load(bn_env, local_max_value, max_value);
-  cgbn_load(bn_env, local_modulus, modulus);
+  env_t::cgbn_t local_field_modulus;
   cgbn_load(bn_env, local_field_modulus, field_modulus);
 
-  DevAltBn128G1 result;
   DevFp dev_field_zero, dev_field_one;
-  result.load(bn_env, t_zero, 0);
   dev_field_zero.load(bn_env, field_zero, 0);
   dev_field_one.load(bn_env, field_one, 0);
-  //result.copy_from(bn_env, dev_t_zero);
   int count = 0;
   for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * local_instances){
     const int j = index_it[i];
@@ -207,25 +198,18 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range(
     if(scalar.isequal(bn_env, dev_field_zero)){
     }
     else if(scalar.isequal(bn_env, dev_field_one)){
-      DevAltBn128G1 dev_b;
-      dev_b.load(bn_env, values, i);
-      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+      flags[j] = 1;
     }
     else{
       const int group_thread = threadIdx.x & (TPI-1);
       if(group_thread == 0){
         density[i] = 1;
       }
-      //DevFp one;
-      //one.set_zero(bn_env);
-      //one.set_one(bn_env);
-      //DevFp a = scalar.mul(bn_env, one, res, buffer, local_field_modulus, field_inv);
       DevFp a = scalar.as_bigint(bn_env, res, buffer, local_field_modulus, field_inv);
       a.store(bn_env, bn_exponents, i);
       count += 1;
     }
   }
-  result.store(bn_env, partial, range_offset + instance);
   __shared__ int cache_counters[64];
   const int group_thread = threadIdx.x & (TPI-1);
   if(group_thread == 0)
@@ -233,15 +217,67 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range(
   __syncthreads();
   if(local_instance == 0){
     for(int i = 1; i < local_instances; i++){
-      DevAltBn128G1 dev_b;
-      dev_b.load(bn_env, partial, range_offset + instance + i);
-      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
       count += cache_counters[i];
     }
-    result.store(bn_env, partial, range_offset + instance);
     if(group_thread == 0){
       counters[blockIdx.y * gridDim.x + blockIdx.x] = count;
     }
+  }
+}
+__global__ void kernel_alt_bn128_g1_reduce_sum_one_range(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 values, 
+    Fp_model scalars,
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    const int ranges_size, 
+    const uint32_t* firsts,
+    const uint32_t* seconds,
+    const char* flags,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv
+    ){
+  int local_instance = threadIdx.x / TPI;//0~63
+  int local_instances = 64;
+  int instance = blockIdx.x * local_instances + local_instance;
+
+  int range_offset = blockIdx.y * gridDim.x * local_instances;
+  int first = firsts[blockIdx.y];
+  int second = seconds[blockIdx.y];
+  int reduce_depth = second - first;//30130
+
+  context_t bn_context(cgbn_report_monitor, report, range_offset + instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  __shared__ uint32_t cache_res[64 * 24];
+  uint32_t *res = &cache_res[local_instance * 24];
+  __shared__ uint32_t cache_buffer[512];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+
+  DevAltBn128G1 result;
+  DevFp dev_field_zero, dev_field_one;
+  result.load(bn_env, t_zero, 0);
+  for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * local_instances){
+    const int j = index_it[i];
+    if(flags[j] == 1){
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, values, i);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+    }
+  }
+  result.store(bn_env, partial, range_offset + instance);
+  __syncthreads();
+  if(local_instance == 0){
+    for(int i = 1; i < local_instances; i++){
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, partial, range_offset + instance + i);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+    }
+    result.store(bn_env, partial, range_offset + instance);
   }
 }
 
@@ -402,6 +438,7 @@ int alt_bn128_g1_reduce_sum_one_range(
     const size_t *index_it,
     alt_bn128_g1 partial, 
     uint32_t *counters,
+    char* flags,
     const uint32_t ranges_size,
     const uint32_t *firsts,
     const uint32_t *seconds,
@@ -422,7 +459,8 @@ int alt_bn128_g1_reduce_sum_one_range(
   const int local_instances = 64 * BlockDepth;
   uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
   dim3 blocks(block_x, ranges_size, 1);
-  kernel_alt_bn128_g1_reduce_sum_one_range<<<blocks, threads>>>(report, values, scalars, index_it, partial, counters, ranges_size, firsts, seconds, max_value, t_zero, field_zero, field_one, density, bn_exponents, modulus, inv, field_modulus, field_inv);
+  kernel_alt_bn128_g1_reduce_sum_one_range_pre<<<blocks, threads>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, max_value, field_zero, field_one, density, bn_exponents, inv, field_modulus, field_inv);
+  kernel_alt_bn128_g1_reduce_sum_one_range<<<blocks, threads>>>(report, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, max_value, t_zero, modulus, inv);
   //CUDA_CHECK(cudaDeviceSynchronize());
   //CGBN_CHECK(report);
   return 0;
@@ -520,7 +558,7 @@ void alt_bn128_g1_reduce_sum2(
   uint32_t threads = 512;
   uint32_t local_instances = threads / TPI;//64
   uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
-  uint32_t blocks = (n + instances - 1) / instances;
+  //uint32_t blocks = (n + instances - 1) / instances;
   //kernel_alt_bn128_g1_reduce_sum2<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
   test<64, 64><<<64, 512, 0, stream>>>(report, data, out, n-1, max_value, modulus, inv);
   const int tmp_n = 64*64; 
