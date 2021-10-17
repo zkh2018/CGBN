@@ -609,17 +609,28 @@ __global__ void kernel_add_block_sum2(
     for(int stride = 1; stride <= 32; stride *= 2){
       int instances = 32 / stride;
       int threads = instances * TPI;
-      kernel_prefix_sum_pre<32, 64><<<prefix_sum_blocks, threads>>>(report, data, n, max_value, modulus, inv, stride);
+      kernel_prefix_sum_pre<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(report, data, n, max_value, modulus, inv, stride);
     }
     for(int stride = 32; stride > 0; stride /= 2){
       int instances = 32 / stride;
       int threads = instances * TPI;
       bool save_block_sum = (stride == 1);
-      kernel_prefix_sum_post<32, 64><<<prefix_sum_blocks, threads>>>(report, data, block_sums, n, max_value, modulus, inv, stride, save_block_sum);
+      kernel_prefix_sum_post<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(report, data, block_sums, n, max_value, modulus, inv, stride, save_block_sum);
+    }
+
+    for(int stride = 1; stride <= 32; stride *= 2){
+      int instances = 32 / stride;
+      int threads = instances * TPI;
+      kernel_prefix_sum_pre<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(report, block_sums, prefix_sum_blocks, max_value, modulus, inv, stride);
+    }
+    for(int stride = 32; stride > 0; stride /= 2){
+      int instances = 32 / stride;
+      int threads = instances * TPI;
+      bool save_block_sum = (stride == 1);
+      kernel_prefix_sum_post<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv, stride, save_block_sum);
     }
     
-    //kernel_prefix_sum<64, 32, true><<<prefix_sum_blocks, threads/2, 0, stream>>>(report, data, block_sums, n, max_value, modulus, inv);
-    kernel_prefix_sum<64, 32, true><<<prefix_sum_blocks2, threads/2, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
+    //kernel_prefix_sum<64, 32, true><<<prefix_sum_blocks2, threads/2, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
     kernel_prefix_sum<16, 8, false><<<1, 128/2, 0, stream>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, max_value, modulus, inv);
     kernel_add_block_sum<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
     kernel_add_block_sum<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(report, data, block_sums, n, max_value, modulus, inv);
