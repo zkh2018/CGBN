@@ -316,7 +316,6 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range2(
   cgbn_load(bn_env, local_modulus, modulus);
 
   DevAltBn128G1 result;
-  DevFp dev_field_zero, dev_field_one;
   result.load(bn_env, t_zero, 0);
   for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * local_instances){
     const int j = index_it[i];
@@ -331,19 +330,17 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range2(
 
 __global__ void kernel_alt_bn128_g1_reduce_sum_one_range3(
     cgbn_error_report_t* report, 
-    alt_bn128_g1 values, 
     alt_bn128_g1 partial, 
     const int n, 
-    const int range_offset,
+    const int range_instances,
     cgbn_mem_t<BITS>* max_value,
-    alt_bn128_g1 t_zero,
     cgbn_mem_t<BITS>* modulus, const uint64_t inv
     ){
   int local_instance = threadIdx.x / TPI;//0~63
   int local_instances = blockDim.x / TPI;
   int instance = blockIdx.x * local_instances + local_instance;
 
-  //int range_offset = blockIdx.y * gridDim.x * local_instances;
+  int range_offset = blockIdx.y * range_instances;
 
   context_t bn_context(cgbn_report_monitor, report, range_offset + instance);
   env_t          bn_env(bn_context.env<env_t>());  
@@ -357,13 +354,12 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range3(
   cgbn_load(bn_env, local_modulus, modulus);
 
   DevAltBn128G1 result;
-  DevFp dev_field_zero, dev_field_one;
-  result.load(bn_env, t_zero, range_offset + instance);
+  result.load(bn_env, partial, range_offset + instance);
   int i = instance + gridDim.x * local_instances;
 
   if(i < n){
     DevAltBn128G1 dev_b;
-    dev_b.load(bn_env, values, range_offset + i);
+    dev_b.load(bn_env, partial, range_offset + i);
     dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
   }
   result.store(bn_env, partial, range_offset + instance);
@@ -371,15 +367,13 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range3(
 
 __global__ void kernel_alt_bn128_g1_reduce_sum_one_range4(
     cgbn_error_report_t* report, 
-    alt_bn128_g1 values, 
     alt_bn128_g1 partial, 
     const int n, 
     const int range_offset,
     cgbn_mem_t<BITS>* max_value,
-    alt_bn128_g1 t_zero,
     cgbn_mem_t<BITS>* modulus, const uint64_t inv
     ){
-  int instance = threadIdx.x / TPI;//0~63
+  int instance = threadIdx.x / TPI;
 
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
@@ -391,12 +385,11 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range4(
   cgbn_load(bn_env, local_modulus, modulus);
 
   DevAltBn128G1 result;
-  DevFp dev_field_zero, dev_field_one;
-  result.load(bn_env, t_zero, instance);
+  result.load(bn_env, partial, 0);
 
-  for(int i = 1; i < n; i+= range_offset){
+  for(int i = 1; i < n; i++){
     DevAltBn128G1 dev_b;
-    dev_b.load(bn_env, values, i);
+    dev_b.load(bn_env, partial, i * range_offset);
     dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
   }
   result.store(bn_env, partial, 0);
@@ -581,8 +574,9 @@ int alt_bn128_g1_reduce_sum_one_range(
   uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
   dim3 blocks(block_x, ranges_size, 1);
   kernel_alt_bn128_g1_reduce_sum_one_range_pre<<<blocks, threads>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, max_value, field_zero, field_one, density, bn_exponents, inv, field_modulus, field_inv);
+
 //*********test
-  const int local_instances2 = 64 * 2;
+  const int local_instances2 = 64 * BlockDepth;
   uint32_t block_x2 =  (max_reduce_depth + local_instances2 - 1) / local_instances2;
   dim3 blocks2(block_x2, ranges_size, 1);
   kernel_alt_bn128_g1_reduce_sum_one_range2<<<blocks2, threads>>>(report, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, max_value, t_zero, modulus, inv);
@@ -591,11 +585,11 @@ int alt_bn128_g1_reduce_sum_one_range(
   while(n >= 2){
     int instances = std::min(64, n/2);
     int threads = instances * TPI; 
-    int blockx = std::min(n / (instances * 2), 1);
-    kernel_alt_bn128_g1_reduce_sum_one_range3<<<dim3(blockx, ranges_size, 1), threads>>>(report, values, partial, n, range_offset, max_value, t_zero, modulus, inv);
+    int blockx = n / (instances * 2);
+    kernel_alt_bn128_g1_reduce_sum_one_range3<<<dim3(blockx, ranges_size, 1), threads>>>(report, partial, n, range_offset, max_value, modulus, inv);
     n /= 2;
   }
-  kernel_alt_bn128_g1_reduce_sum_one_range4<<<1, 8>>>(report, values, partial, ranges_size, range_offset, max_value, t_zero, modulus, inv);
+  kernel_alt_bn128_g1_reduce_sum_one_range4<<<1, TPI>>>(report, partial, ranges_size, range_offset, max_value, modulus, inv);
 //********test
 
   //kernel_alt_bn128_g1_reduce_sum_one_range<<<blocks, threads>>>(report, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, max_value, t_zero, modulus, inv);
