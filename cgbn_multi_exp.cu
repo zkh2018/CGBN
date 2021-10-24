@@ -538,6 +538,7 @@ __global__ void kernel_reverse(
   void bucket_reduce_sum(
       alt_bn128_g1 data,
       int* starts, int* ends, int* ids,
+      int *d_instance_bucket_ids,
       alt_bn128_g1 buckets,
       const int bucket_num,
       const int data_size,
@@ -546,11 +547,12 @@ __global__ void kernel_reverse(
       cgbn_mem_t<BITS>* modulus, const uint64_t inv,
       CudaStream stream){
     cgbn_error_report_t *report = get_error_report();
-    int *d_instance_bucket_ids, *d_instances;
-    cudaMalloc((void**)&d_instance_bucket_ids, sizeof(int) * data_size);
-    cudaMalloc((void**)&d_instances, sizeof(int));
+    //int *d_instance_bucket_ids, *d_instances;
+    //cudaMalloc((void**)&d_instance_bucket_ids, sizeof(int) * data_size);
+    //cudaMalloc((void**)&d_instances, sizeof(int));
     std::vector<std::vector<int>> sections = {
                       {128, 10240000}};
+    int *d_instances = d_instance_bucket_ids + data_size - 1;
     for(int i = 0; i < sections.size(); i++){
       int left = sections[i][0];
       int right = sections[i][1];
@@ -573,8 +575,8 @@ __global__ void kernel_reverse(
         }
       }
     }
-    cudaFree(d_instance_bucket_ids);
-    cudaFree(d_instances);
+    //cudaFree(d_instance_bucket_ids);
+    //cudaFree(d_instances);
     //const int threads = 512;
     //int reverse_blocks = (bucket_num + threads - 1) / threads;
     //kernel_reverse<<<reverse_blocks, threads, 0, stream>>>(data, starts, buckets, bucket_num);

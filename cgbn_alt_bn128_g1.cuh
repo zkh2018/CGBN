@@ -53,9 +53,18 @@ struct DevFp{
     device_fp_sub(bn_env, ret.mont, mont, other.mont, modulus, max_value);
     return ret;
   }
+
   inline __device__ DevFp add(env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
     DevFp ret;
     device_fp_add(bn_env, ret.mont, mont, other.mont, modulus, max_value);
+    return ret;
+  }
+
+  inline __device__ DevFp negative(env_t& bn_env, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
+    if(is_zero(bn_env)) return *this;
+
+    DevFp ret;
+    device_fp_sub(bn_env, ret.mont, mont, modulus, modulus, max_value);
     return ret;
   }
 

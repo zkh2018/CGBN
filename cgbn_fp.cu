@@ -1,4 +1,3 @@
-
 #include "cgbn_fp.h"
 #include "cgbn_fp.cuh"
 
