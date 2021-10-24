@@ -2,6 +2,9 @@
 #define CGBN_MULTI_EXP_H
 
 namespace gpu{
+
+  const int BUCKET_INSTANCES = 64;
+
   void bucket_counter(
       const char* density,
       const cgbn_mem_t<BITS>* bn_exponents,
@@ -27,6 +30,7 @@ namespace gpu{
       int* starts, int* ends, int *ids,
       alt_bn128_g1 buckets,
       const int bucket_num,
+      const int data_size,
       cgbn_mem_t<BITS>* max_value,
       alt_bn128_g1 t_zero,
       cgbn_mem_t<BITS>* modulus, const uint64_t inv,
