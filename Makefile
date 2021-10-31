@@ -13,7 +13,7 @@ pick:
 	@echo
 
 lib:
-	nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu cgbn_multi_exp.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples
+	nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_fp2.cu cgbn_alt_bn128_g1.cu cgbn_alt_bn128_g2.cu cgbn_multi_exp.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples
 #nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_alt_bn128_g1.cu cgbn_multi_exp.cu -lib -o libcgbn_math.a -I./include -I./samples
 
 test: lib test.cpp

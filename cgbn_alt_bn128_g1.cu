@@ -259,7 +259,6 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range(
   cgbn_load(bn_env, local_modulus, modulus);
 
   DevAltBn128G1 result;
-  DevFp dev_field_zero, dev_field_one;
   result.load(bn_env, t_zero, 0);
   for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * local_instances){
     const int j = index_it[i];

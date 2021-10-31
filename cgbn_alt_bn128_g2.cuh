@@ -1,25 +1,28 @@
-#ifndef CGBN_ALT_BN128_G1_CUH
-#define CGBN_ALT_BN128_G1_CUH
+#ifndef CGBN_ALT_BN128_G2_CUH
+#define CGBN_ALT_BN128_G2_CUH
 
-#include "cgbn_fp2.cuh"
 #include "cgbn_alt_bn128_g1.cuh"
 
+namespace gpu{
 struct DevFp2{
   DevFp c0, c1;
-  inline __device__ DevFp2 squared_complex(env_t& bn_env, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const env_t::max_value, const uint64_t inv, const DevFp& non_residue) const {
+  //squared_complex
+  inline __device__ DevFp2 squared(env_t& bn_env, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const env_t::cgbn_t& max_value, const uint64_t inv, const DevFp& non_residue) const {
     DevFp ab = c0.mul(bn_env, c1, res, tmp_buffer, modulus, inv);
     DevFp a_add_b = c0.add(bn_env, c1, max_value, modulus);
     DevFp nrb = non_residue.mul(bn_env, c1, res, tmp_buffer, modulus, inv);
-    DevFp first = a_add_b.mul(bn_env, nrb, res, tmp_buffer, modulus, inv);
+    DevFp nrab = non_residue.mul(bn_env, ab, res, tmp_buffer, modulus, inv);
+    DevFp a_add_nrb = c0.add(bn_env, nrb, max_value, modulus);
+    DevFp first = a_add_b.mul(bn_env, a_add_nrb, res, tmp_buffer, modulus, inv);
     DevFp first_ab = first.sub(bn_env, ab, max_value, modulus);
     
     DevFp2 ret;
-    ret.c0 = first_ab.sub(bn_env, nrb, max_value, modulus);
+    ret.c0 = first_ab.sub(bn_env, nrab, max_value, modulus);
     ret.c1 = ab.add(bn_env, ab, max_value, modulus);
     return ret;
   }
 
-  inline __device__ DevFp2 mul(env_t& bn_env, const DevFp2& other, uint32_t *res, uint32_t* buffer, const env_t::cgbn_t& modulus, const env_t::max_value, const uint64_t inv, const DevFp& non_residue) const {
+  inline __device__ DevFp2 mul(env_t& bn_env, const DevFp2& other, uint32_t *res, uint32_t* buffer, const env_t::cgbn_t& modulus, const env_t::cgbn_t& max_value, const uint64_t inv, const DevFp& non_residue) const {
     DevFp aA = this->c0.mul(bn_env, other.c0, res, buffer, modulus, inv); 
     DevFp bB = this->c1.mul(bn_env, other.c1, res, buffer, modulus, inv);
     DevFp nrb = non_residue.mul(bn_env, bB, res, buffer, modulus, inv);
@@ -42,20 +45,20 @@ struct DevFp2{
   }
 
   inline __device__ DevFp2 sub(env_t& bn_env, const DevFp2& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
-    DevFp ret;
+    DevFp2 ret;
     ret.c0 = this->c0.sub(bn_env, other.c0, max_value, modulus);
     ret.c1 = this->c1.sub(bn_env, other.c1, max_value, modulus);
     return ret;
   }
   inline __device__ DevFp2 add(env_t& bn_env, const DevFp2& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
-    DevFp ret;
+    DevFp2 ret;
     ret.c0 = this->c0.add(bn_env, other.c0, max_value, modulus);
     ret.c1 = this->c1.add(bn_env, other.c1, max_value, modulus);
     return ret;
   }
 
-  inline __device__ bool is_zero(env_t& bn_env){
-    return (c0.is_zero() && c1.is_zero());
+  inline __device__ bool is_zero(env_t& bn_env) const {
+    return (c0.is_zero(bn_env) && c1.is_zero(bn_env));
   }
 
   inline __device__ bool isequal(env_t& bn_env, const DevFp2& other) const {
@@ -63,10 +66,26 @@ struct DevFp2{
   }
 
   inline __device__ void copy_from(env_t& bn_env, const DevFp2& other){
-    c0.copy_from(bn_env, othre.c0);
-    c1.copy_from(bn_env, othre.c1);
+    c0.copy_from(bn_env, other.c0);
+    c1.copy_from(bn_env, other.c1);
   }
 
+  inline __device__ void set_zero(env_t& bn_env){
+    c0.set_zero(bn_env);
+    c1.set_zero(bn_env);
+  }
+  inline __device__ void set_one(env_t& bn_env){
+    c0.set_one(bn_env);
+    c1.set_one(bn_env);
+  }
+
+  inline __device__ void load(env_t& bn_env, const Fp_model2& a, const int offset){
+    c0.load(bn_env, a.c0, offset);
+    c1.load(bn_env, a.c1, offset);
+  }
+  //inline __device__ void store(env_t& bn_env, cgbn_mem_t<BITS>* a, const int offset){
+  //  cgbn_store(bn_env, a + offset, mont);
+  //}
 };
 
 struct DevAltBn128G2{
@@ -75,7 +94,7 @@ struct DevAltBn128G2{
     return z.is_zero(bn_env);
   }
 
-  inline __device__ bool is_equal(env_t& bn_env, DevAltBn128G2& other, uint32_t* res, uint32_t* buffer, const env_t::cgbn_t& modulus, const uint64_t inv ) const {
+  inline __device__ bool is_equal(env_t& bn_env, DevAltBn128G2& other, uint32_t* res, uint32_t* buffer, const env_t::cgbn_t& modulus, const env_t::cgbn_t& max_value, const uint64_t inv, const DevFp& non_residue) const {
     if(this->is_zero(bn_env)){
       return other.is_zero(bn_env);
     }
@@ -83,17 +102,17 @@ struct DevAltBn128G2{
       return false;
     }
 
-    DevFp2 Z1 = this->z.squared(bn_env, res, buffer, modulus, inv);
-    DevFp2 Z2 = other.z.squared(bn_env, res, buffer, modulus, inv);
-    DevFp2 XZ2 = x.mul(bn_env, Z2, res, buffer, modulus, inv);
-    DevFp2 XZ1 = other.x.mul(bn_env, Z1, res, buffer, modulus, inv);
+    DevFp2 Z1 = this->z.squared(bn_env, res, buffer, modulus, max_value, inv, non_residue);
+    DevFp2 Z2 = other.z.squared(bn_env, res, buffer, modulus, max_value, inv, non_residue);
+    DevFp2 XZ2 = x.mul(bn_env, Z2, res, buffer, modulus, max_value, inv, non_residue);
+    DevFp2 XZ1 = other.x.mul(bn_env, Z1, res, buffer, modulus, max_value, inv, non_residue);
     if(!XZ2.isequal(bn_env, XZ1)){
       return false;
     }
-    DevFp2 Z1_cubed = this->z.mul(bn_env, Z1, res, buffer, modulus, inv);
-    DevFp2 Z2_cubed = other.z.mul(bn_env, Z2, res, buffer, modulus, inv);
-    DevFp2 YZ2 = this->y.mul(bn_env, Z2_cubed, res, buffer, modulus, inv);
-    DevFp2 YZ1 = other.y.mul(bn_env, Z1_cubed, res, buffer, modulus, inv);
+    DevFp2 Z1_cubed = this->z.mul(bn_env, Z1, res, buffer, modulus, max_value, inv, non_residue);
+    DevFp2 Z2_cubed = other.z.mul(bn_env, Z2, res, buffer, modulus, max_value, inv, non_residue);
+    DevFp2 YZ2 = this->y.mul(bn_env, Z2_cubed, res, buffer, modulus, max_value, inv, non_residue);
+    DevFp2 YZ1 = other.y.mul(bn_env, Z1_cubed, res, buffer, modulus, max_value, inv, non_residue);
     if(!YZ2.isequal(bn_env, YZ1)){
       return false;
     }
@@ -110,8 +129,24 @@ struct DevAltBn128G2{
     y.copy_from(bn_env, y_);
     z.copy_from(bn_env, z_);
   }
+  inline __device__ void load(env_t& bn_env, alt_bn128_g2& a, const int offset){
+    cgbn_load(bn_env, x.c0.mont, a.x.c0.mont_repr_data + offset);
+    cgbn_load(bn_env, x.c1.mont, a.x.c1.mont_repr_data + offset);
+    cgbn_load(bn_env, y.c0.mont, a.y.c0.mont_repr_data + offset);
+    cgbn_load(bn_env, y.c1.mont, a.y.c1.mont_repr_data + offset);
+    cgbn_load(bn_env, z.c0.mont, a.z.c0.mont_repr_data + offset);
+    cgbn_load(bn_env, z.c1.mont, a.z.c1.mont_repr_data + offset);
+  }
+  inline __device__ void store(env_t& bn_env, alt_bn128_g2& a, const int offset){
+    cgbn_store(bn_env, a.x.c0.mont_repr_data + offset, x.c0.mont);
+    cgbn_store(bn_env, a.x.c1.mont_repr_data + offset, x.c1.mont);
+    cgbn_store(bn_env, a.y.c0.mont_repr_data + offset, y.c0.mont);
+    cgbn_store(bn_env, a.y.c1.mont_repr_data + offset, y.c1.mont);
+    cgbn_store(bn_env, a.z.c0.mont_repr_data + offset, z.c0.mont);
+    cgbn_store(bn_env, a.z.c1.mont_repr_data + offset, z.c1.mont);
+  }
 
-  inline __device__ void dbl(env_t& bn_env, DevAltBn128G2* dev_c, uint32_t* res, uint32_t* buffer, env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus, const uint64_t inv, DevFp2& non_residue) const {
+  inline __device__ void dbl(env_t& bn_env, DevAltBn128G2* dev_c, uint32_t* res, uint32_t* buffer, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus, const uint64_t inv, const DevFp& non_residue) const {
     if(is_zero(bn_env)){
       //store(bn_env, c, instance);
       dev_c->copy_from(bn_env, *this);
@@ -127,7 +162,7 @@ struct DevAltBn128G2{
     //D = squared(a.x + B) - A - C
     DevFp2 xb = x.add(bn_env, B, max_value, modulus);
     DevFp2 xb2 = xb.squared(bn_env, res, buffer, modulus, max_value, inv, non_residue);
-    xb = 2xb2.sub(bn_env, A, max_value, modulus);
+    xb = xb2.sub(bn_env, A, max_value, modulus);
     DevFp2 tmp_D = xb.sub(bn_env, C, max_value, modulus);
     //D = D+D
     DevFp2 D = tmp_D.add(bn_env, tmp_D, max_value, modulus);
@@ -158,7 +193,7 @@ struct DevAltBn128G2{
   }
 };
 
-inline __device__ void dev_alt_bn128_g2_add(env_t& bn_env, const DevAltBn128G2& dev_a, const DevAltBn128G2& dev_b, DevAltBn128G2* dev_c, uint32_t* res, uint32_t* buffer, env_t::cgbn_t& tmax_value, const env_t::cgbn_t& modulus, const uint64_t inv){
+inline __device__ void dev_alt_bn128_g2_add(env_t& bn_env, const DevAltBn128G2& dev_a, const DevAltBn128G2& dev_b, DevAltBn128G2* dev_c, uint32_t* res, uint32_t* buffer, env_t::cgbn_t& tmax_value, const env_t::cgbn_t& modulus, const uint64_t inv, const DevFp& non_residue){
   if(dev_a.is_zero(bn_env)){
    // dev_b.store(bn_env, c, instance);
     dev_c->copy_from(bn_env, dev_b);
@@ -227,3 +262,6 @@ inline __device__ void dev_alt_bn128_g2_add(env_t& bn_env, const DevAltBn128G2& 
   dev_c->set(bn_env, X3, Y3, Z3);
   //dev_a.store(bn_env, X3, Y3, Z3, c, instance);
 }
+} //namespace gpu
+
+#endif

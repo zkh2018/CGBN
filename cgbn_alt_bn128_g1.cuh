@@ -2,6 +2,7 @@
 #define CGBN_ALT_BN128_G1_CUH
 
 #include "cgbn_fp.cuh"
+#include "cgbn_alt_bn128_g1.h"
 
 namespace gpu{
 struct DevFp{

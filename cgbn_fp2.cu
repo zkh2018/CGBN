@@ -1,5 +1,5 @@
 #include "cgbn_fp2.h"
-#include "cgbn_fp2.cuh"
+#include "cgbn_fp.cuh"
 
 #include <cuda_runtime.h>
 #include <cuda.h>

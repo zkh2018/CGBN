@@ -1,5 +1,5 @@
-#ifndef CGBN_FP_H
-#define CGBN_FP_H
+#ifndef CGBN_FP2_H
+#define CGBN_FP2_H
 
 #include "cgbn_math.h"
 #include "cgbn_fp.h"
@@ -9,6 +9,7 @@ namespace gpu{
 struct Fp_model2 {
   Fp_model c0, c1;
 
+  Fp_model2(){}
   Fp_model2(const int count);
   void init(const int count);
   void init_host(const int count);
