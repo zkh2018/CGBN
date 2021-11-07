@@ -253,4 +253,58 @@ int alt_bn128_g2_reduce_sum_one_range(
   return 0;
 }
 
+template<int BlockSize, int BlockNum>
+__global__ void test_g2(
+    cgbn_error_report_t* report, 
+    alt_bn128_g2 data, 
+    alt_bn128_g2 out, 
+    int n,
+    cgbn_mem_t<BITS>* max_value,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv,
+    Fp_model non_residue
+    ){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  int local_instance = threadIdx.x / TPI;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  DevAltBn128G2 a;
+  a.load(bn_env, data, instance);
+  __shared__ uint32_t cache_buffer[BlockSize*8];
+  __shared__ uint32_t cache_res[BlockSize*24];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
+  uint32_t *res = &cache_res[local_instance * 24];
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+  DevFp dev_non_residue;
+  dev_non_residue.load(bn_env, non_residue, 0);
+  for(int i = instance + BlockNum*BlockSize; i < n; i+=BlockNum*BlockSize){
+    DevAltBn128G2 b;
+    b.load(bn_env, data, i);
+    dev_alt_bn128_g2_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv, dev_non_residue);
+  }
+  a.store(bn_env, out, instance);
+}
+void alt_bn128_g2_reduce_sum2(
+    alt_bn128_g2 data, 
+    alt_bn128_g2 out, 
+    const uint32_t n,
+    cgbn_mem_t<BITS>* max_value,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv, 
+    Fp_model non_residue, 
+    CudaStream stream){
+  cgbn_error_report_t *report = get_error_report();
+  uint32_t threads = 512;
+  uint32_t local_instances = threads / TPI;//64
+  uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
+  //uint32_t blocks = (n + instances - 1) / instances;
+  //kernel_alt_bn128_g1_reduce_sum2<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
+  test_g2<32, 128><<<128, 256, 0, stream>>>(report, data, out, n-1, max_value, modulus, inv, non_residue);
+  const int tmp_n = 32*128; 
+  test_g2<32, 16><<<16, 256, 0, stream>>>(report, out, data, tmp_n, max_value, modulus, inv, non_residue);
+  test_g2<16, 4><<<4, 128, 0, stream>>>(report, data, out, 32*16, max_value, modulus, inv, non_residue);
+  test_g2<8, 1><<<1, 64, 0, stream>>>(report, out, data, 64, max_value, modulus, inv, non_residue);
+  test_g2<1, 1><<<1, 8, 0, stream>>>(report, data, out, 8, max_value, modulus, inv, non_residue);
+}
 }//namespace gpu

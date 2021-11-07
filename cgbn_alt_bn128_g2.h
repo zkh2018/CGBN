@@ -42,6 +42,15 @@ int alt_bn128_g2_reduce_sum_one_range(
     cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
     const int max_reduce_depth);
 
+void alt_bn128_g2_reduce_sum2(
+    alt_bn128_g2 data, 
+    alt_bn128_g2 out, 
+    const uint32_t n,
+    cgbn_mem_t<BITS>* max_value,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv,
+    Fp_model non_residue, 
+    CudaStream stream = 0);
+
 }//namespace gpu
 
 #endif

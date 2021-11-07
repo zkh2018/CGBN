@@ -11,21 +11,71 @@
 
 
 namespace gpu{
+inline __device__ size_t dev_get_id(const size_t c, const size_t bitno, uint64_t* data){
+  const uint64_t one = 1;
+  const uint64_t mask = (one << c) - one;
+  const size_t limb_num_bits = 64;//sizeof(mp_limb_t) * 8;
 
-  __device__ size_t dev_get_id(const size_t c, const size_t bitno, uint64_t* data){
-    const uint64_t one = 1;
-    const uint64_t mask = (one << c) - one;
-    const size_t limb_num_bits = 64;//sizeof(mp_limb_t) * 8;
+  const size_t part = bitno / limb_num_bits;
+  const size_t bit = bitno % limb_num_bits;
+  size_t id = (data[part] & (mask << bit)) >> bit;
+  //const mp_limb_t next_data = (bit + c >= limb_num_bits && part < 3) ? bn_exponents[i].data[part+1] : 0;
+  //id |= (next_data & (mask >> (limb_num_bits - bit))) << (limb_num_bits - bit);
+  id |= (((bit + c >= limb_num_bits && part < 3) ? data[part+1] : 0) & (mask >> (limb_num_bits - bit))) << (limb_num_bits - bit);
 
-    const size_t part = bitno / limb_num_bits;
-    const size_t bit = bitno % limb_num_bits;
-    size_t id = (data[part] & (mask << bit)) >> bit;
-    //const mp_limb_t next_data = (bit + c >= limb_num_bits && part < 3) ? bn_exponents[i].data[part+1] : 0;
-    //id |= (next_data & (mask >> (limb_num_bits - bit))) << (limb_num_bits - bit);
-    id |= (((bit + c >= limb_num_bits && part < 3) ? data[part+1] : 0) & (mask >> (limb_num_bits - bit))) << (limb_num_bits - bit);
+  return id;
+}
 
-    return id;
+__global__ void kernel_get_instances_and_bucket_id(
+    const int *starts, const int *ends, const int bucket_num,
+    int *instances, int *instance_bucket_ids,
+    const int left, const int right){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  if(tid >= bucket_num) return;
+
+  int bucket_size = ends[tid] - starts[tid];
+  if(bucket_size >= left && bucket_size < right){
+    int half_bucket_size = bucket_size / 2;
+    int i = atomicAdd(instances, half_bucket_size);
+    for(int j = 0; j < half_bucket_size; j++){
+      instance_bucket_ids[i + j] = tid;
+    }
   }
+}
+
+__global__ void kernel_update_ends(const int *instance_bucket_ids, const int *starts, int* ends, const int total_instances){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  for(int instance = tid; instance < total_instances; instance += gridDim.x * blockDim.x){
+    int bucket_id = instance_bucket_ids[instance];
+    int start = starts[bucket_id];
+    int bucket_size = ends[bucket_id] - start;
+    int half_bucket_size = bucket_size / 2;
+    int bucket_instance = instance % half_bucket_size;
+    if(bucket_instance == 0)
+      ends[bucket_id] = start + half_bucket_size;
+  }
+}
+
+template<int left, int right>
+__global__ void kernel_get_bucket(
+    int *starts, int *ends,
+    int *out_starts, int *out_ends, int* out_ids,
+    int *num,
+    int bucket_num
+    ){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  for(int i = tid; i < bucket_num; i+=gridDim.x * blockDim.x){
+    int start = starts[i];
+    int end = ends[i];
+    int len = end-start;
+    if(len > left && len <= right){
+      int index = atomicAdd(num, 1);
+      out_starts[index] = start;
+      out_ends[index] = end;
+      out_ids[index] = i;
+    }
+  }
+}
 
   __global__ void kernel_bucket_counter(
       const char* density,
@@ -122,26 +172,6 @@ namespace gpu{
     }
   }
 
-  template<int left, int right>
-  __global__ void kernel_get_bucket(
-      int *starts, int *ends,
-      int *out_starts, int *out_ends, int* out_ids,
-      int *num,
-      int bucket_num
-      ){
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    for(int i = tid; i < bucket_num; i+=gridDim.x * blockDim.x){
-      int start = starts[i];
-      int end = ends[i];
-      int len = end-start;
-      if(len > left && len <= right){
-        int index = atomicAdd(num, 1);
-        out_starts[index] = start;
-        out_ends[index] = end;
-        out_ids[index] = i;
-      }
-    }
-  }
 
   template<int Offset>
   __global__ void kernel_one_bucket_reduce_sum(
@@ -444,22 +474,6 @@ namespace gpu{
     kernel_medium_bucket_reduce_sum<instances, BUCKET_INSTANCES><<<large_num, instances*8, 0, stream>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, max_value, t_zero, modulus, inv);\
 }
 
-__global__ void kernel_get_instances_and_bucket_id(
-    const int *starts, const int *ends, const int bucket_num,
-    int *instances, int *instance_bucket_ids,
-    const int left, const int right){
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  if(tid >= bucket_num) return;
-
-  int bucket_size = ends[tid] - starts[tid];
-  if(bucket_size >= left && bucket_size < right){
-    int half_bucket_size = bucket_size / 2;
-    int i = atomicAdd(instances, half_bucket_size);
-    for(int j = 0; j < half_bucket_size; j++){
-      instance_bucket_ids[i + j] = tid;
-    }
-  }
-}
 __global__ void kernel_bucket_reduce_by_certain_instances(
     cgbn_error_report_t* report, 
     alt_bn128_g1 data,
@@ -505,18 +519,7 @@ __global__ void kernel_bucket_reduce_by_certain_instances(
     //ends[bucket_id] = start + half_bucket_size;
   }
 }
-__global__ void kernel_update_ends(const int *instance_bucket_ids, const int *starts, int* ends, const int total_instances){
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  for(int instance = tid; instance < total_instances; instance += gridDim.x * blockDim.x){
-    int bucket_id = instance_bucket_ids[instance];
-    int start = starts[bucket_id];
-    int bucket_size = ends[bucket_id] - start;
-    int half_bucket_size = bucket_size / 2;
-    int bucket_instance = instance % half_bucket_size;
-    if(bucket_instance == 0)
-      ends[bucket_id] = start + half_bucket_size;
-  }
-}
+
 __global__ void kernel_reverse(
       alt_bn128_g1 data,
       int* starts,

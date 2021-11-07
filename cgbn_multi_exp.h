@@ -4,6 +4,7 @@
 namespace gpu{
 
   const int BUCKET_INSTANCES = 64;
+  const int BUCKET_INSTANCES_G2 = 64;
 
   void bucket_counter(
       const char* density,
