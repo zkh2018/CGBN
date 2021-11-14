@@ -7,6 +7,7 @@ namespace gpu{
   const int BUCKET_INSTANCES_G2 = 64;
 
   void bucket_counter(
+      const bool with_density,
       const char* density,
       const cgbn_mem_t<BITS>* bn_exponents,
       const int c, const int k,
@@ -20,6 +21,7 @@ namespace gpu{
   void split_to_bucket(
       alt_bn128_g1 data, 
       alt_bn128_g1 out, 
+      const bool with_density,
       const char* density,
       const cgbn_mem_t<BITS>* bn_exponents,
       const int c, const int k,
