@@ -41,6 +41,10 @@ void sync(CudaStream stream){
   cudaStreamSynchronize(stream);
 }
 
+void gpu_reset(){
+  cudaDeviceReset();
+}
+
 
 void gpu_buffer::resize(int new_n){
   if(total_n == 0){

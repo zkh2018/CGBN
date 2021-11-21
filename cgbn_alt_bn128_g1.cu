@@ -581,12 +581,13 @@ int alt_bn128_g1_reduce_sum_one_range(
   kernel_alt_bn128_g1_reduce_sum_one_range2<<<blocks2, threads>>>(report, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, max_value, t_zero, modulus, inv);
   int n = block_x2 * 64;
   int range_offset = n;
+
   while(n >= 2){
     int instances = std::min(64, n/2);
-    int threads = instances * TPI; 
-    int blockx = n / (instances * 2);
+    threads = instances * TPI; 
+    int blockx = n < instances * 2 ? 1 : (n + instances*2-1) / (instances * 2);
     kernel_alt_bn128_g1_reduce_sum_one_range3<<<dim3(blockx, ranges_size, 1), threads>>>(report, partial, n, range_offset, max_value, modulus, inv);
-    n /= 2;
+    n = blockx * instances;
   }
   kernel_alt_bn128_g1_reduce_sum_one_range4<<<1, TPI>>>(report, partial, ranges_size, range_offset, max_value, modulus, inv);
 //********test
@@ -710,7 +711,6 @@ __global__ void kernel_warmup(){
   for(int i = 0; i < 1000; i++){
     sum += i;
   }
-  printf("warm up : %d\n", sum);
 }
 void warm_up(){
   kernel_warmup<<<1, 1>>>();
