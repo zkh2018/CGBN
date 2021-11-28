@@ -24,9 +24,9 @@ cgbn_alt_bn128_g1.o: cgbn_alt_bn128_g1.cu
 cgbn_alt_bn128_g2.o: cgbn_alt_bn128_g2.cu
 	nvcc -arch=sm_75 cgbn_alt_bn128_g2.cu -Xcompiler="-fPIC" -c -o cgbn_alt_bn128_g2.o -I./include -I./samples
 cgbn_multi_exp.o: cgbn_multi_exp.cu
-	nvcc -arch=sm_75 cgbn_multi_exp.cu -Xcompiler="-fPIC" -c -o cgbn_multi_exp.o -I./include -I./samples
+	nvcc -arch=sm_75 cgbn_multi_exp.cu -Xcompiler="-fPIC" -c -o cgbn_multi_exp.o -I./include -I./samples -I/usr/local/cub-1.8.0/
 cgbn_multi_exp_g2.o: cgbn_multi_exp_g2.cu
-	nvcc -arch=sm_75 cgbn_multi_exp_g2.cu -Xcompiler="-fPIC" -c -o cgbn_multi_exp_g2.o -I./include -I./samples
+	nvcc -arch=sm_75 cgbn_multi_exp_g2.cu -Xcompiler="-fPIC" -c -o cgbn_multi_exp_g2.o -I./include -I./samples -I/usr/local/cub-1.8.0/
 
 lib: cgbn_math.o cgbn_fp.o cgbn_fp2.o cgbn_alt_bn128_g1.o cgbn_alt_bn128_g2.o cgbn_multi_exp.o cgbn_multi_exp_g2.o
 #nvcc -arch=sm_75 cgbn_math.cu cgbn_fp.cu cgbn_fp2.cu cgbn_alt_bn128_g1.cu cgbn_alt_bn128_g2.cu cgbn_multi_exp.cu cgbn_multi_exp_g2.cu -Xcompiler -fPIC -shared -o libcgbn_math.so -I./include -I./samples

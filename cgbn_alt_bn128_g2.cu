@@ -268,8 +268,6 @@ __global__ void test_g2(
   int local_instance = threadIdx.x / TPI;
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
-  DevAltBn128G2 a;
-  a.load(bn_env, data, instance);
   __shared__ uint32_t cache_buffer[BlockSize*8];
   __shared__ uint32_t cache_res[BlockSize*24];
   uint32_t *buffer = &cache_buffer[local_instance * 8];
@@ -279,6 +277,9 @@ __global__ void test_g2(
   cgbn_load(bn_env, local_modulus, modulus);
   DevFp dev_non_residue;
   dev_non_residue.load(bn_env, non_residue, 0);
+
+  DevAltBn128G2 a;
+  a.load(bn_env, data, instance);
   for(int i = instance + BlockNum*BlockSize; i < n; i+=BlockNum*BlockSize){
     DevAltBn128G2 b;
     b.load(bn_env, data, i);

@@ -17,6 +17,7 @@ namespace gpu{
 typedef cudaStream_t CudaStream;
 void create_stream(CudaStream* stream);
 void sync(CudaStream stream);
+void sync_device();
 void gpu_reset();
 
 void gpu_malloc(void** ptr, size_t size);

@@ -4,6 +4,7 @@
 
 #include <thrust/scan.h>
 #include <thrust/execution_policy.h>
+#include <cub/cub.cuh>
 
 #include <time.h>
 #include <vector>
@@ -94,6 +95,74 @@ __global__ void kernel_get_bucket(
       }
     }
   }
+  __global__ void kernel_split_to_bucket(
+      alt_bn128_g1 data, 
+      alt_bn128_g1 out, 
+      const bool with_density,
+      const char* density,
+      const cgbn_mem_t<BITS>* bn_exponents,
+      const int c, const int k,
+      const int data_length,
+      int *indexs, int*tids){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    for(int i = tid; i < data_length; i+= gridDim.x * blockDim.x){
+      if(!with_density || density[i]){
+        size_t id = dev_get_id(c, k*c, (uint64_t*)bn_exponents[i]._limbs);
+        if(id != 0){
+          int index = atomicAdd(&indexs[id], 1);
+          tids[index] = i;
+        }
+      }
+    }
+  }
+
+  __global__ void kernel_split_to_bucket(
+      alt_bn128_g1 data, 
+      alt_bn128_g1 out, 
+      const bool with_density,
+      const char* density,
+      const cgbn_mem_t<BITS>* bn_exponents,
+      const int c, const int k,
+      const int data_length,
+      int *starts, int *indexs, int*tids, int *ids){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    for(int i = tid; i < data_length; i+= gridDim.x * blockDim.x){
+      if(!with_density || density[i]){
+        size_t id = dev_get_id(c, k*c, (uint64_t*)bn_exponents[i]._limbs);
+        if(id != 0){
+          int start = starts[id];
+          int end = indexs[id];
+          for(int j = start; j<end; j++){
+            if(i == tids[j]){
+              ids[j] = j;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  __global__ void kernel_split_to_bucket(
+      alt_bn128_g1 data, 
+      alt_bn128_g1 out, 
+      const int c, const int k,
+      const int data_length,
+      int *tids){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    for(int i = tid; i < data_length; i+= gridDim.x * blockDim.x){
+      int real_i = tids[i];
+      //size_t bucket_id = dev_get_id(c, k*c, (uint64_t*)bn_exponents[real_i]._limbs);
+      int index = i;// + starts[bucket_id];
+//#pragma unroll
+      for(int j = 0; j < 4; j++){
+        ((uint64_t*)out.x.mont_repr_data[index]._limbs)[j] = ((uint64_t*)data.x.mont_repr_data[real_i]._limbs)[j];
+        ((uint64_t*)out.y.mont_repr_data[index]._limbs)[j] = ((uint64_t*)data.y.mont_repr_data[real_i]._limbs)[j];
+        ((uint64_t*)out.z.mont_repr_data[index]._limbs)[j] = ((uint64_t*)data.z.mont_repr_data[real_i]._limbs)[j];
+      }
+    }
+  }
+
   __global__ void kernel_split_to_bucket(
       alt_bn128_g1 data, 
       alt_bn128_g1 out, 
@@ -454,12 +523,43 @@ __global__ void kernel_get_bucket(
       const cgbn_mem_t<BITS>* bn_exponents,
       const int c, const int k,
       const int data_length,
+      int *starts,
       int *indexs, CudaStream stream){
     int threads = 512;
     int blocks = (data_length + threads-1) / threads;
 
-    kernel_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, with_density, density, bn_exponents, c, k, data_length, indexs);
+    if(false){
+      const int bucket_num = 1<<c;
+      int *tids, *sorted_tids;
+      cudaMalloc((void**)&tids, data_length * sizeof(int));
+      cudaMalloc((void**)&sorted_tids, data_length * sizeof(int));
+      //1 get tids
+      kernel_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, with_density, density, bn_exponents, c, k, data_length, indexs, tids);
+      //2. sort
+      int real_n = 0;
+      cudaMemcpy(&real_n, indexs + bucket_num -1, sizeof(int), cudaMemcpyDeviceToHost);
+      cudaMemcpy(starts + bucket_num, indexs + bucket_num - 1, sizeof(int), cudaMemcpyDeviceToDevice);
+      void     *d_temp_storage = NULL;
+      size_t   temp_storage_bytes = 0;
+      cub::DeviceSegmentedRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, tids, sorted_tids,
+          real_n, 1<<c, starts, starts + 1);
+      // Allocate temporary storage
+      cudaMalloc(&d_temp_storage, temp_storage_bytes);
+      // Run sorting operation
+      cub::DeviceSegmentedRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, tids, sorted_tids,
+          real_n, 1<<c, starts, starts+ 1);
+      //3. split 
+      blocks = (real_n + threads-1)/threads;
+      kernel_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, c, k, real_n, sorted_tids);
+      CUDA_CHECK(cudaDeviceSynchronize());
+      cudaFree(tids);
+      cudaFree(sorted_tids);
+      cudaFree(d_temp_storage);
+    }else{
+      kernel_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, with_density, density, bn_exponents, c, k, data_length, indexs);
     //CUDA_CHECK(cudaDeviceSynchronize());
+    }
+
   }
 
 #define LITTLE_BUCKET_REDUCE(left, right){\

@@ -26,7 +26,7 @@ namespace gpu{
       const cgbn_mem_t<BITS>* bn_exponents,
       const int c, const int k,
       const int data_length,
-      int *indexs, CudaStream stream = 0);
+      int *starts, int *indexs, CudaStream stream = 0);
 
   void bucket_reduce_sum(
       alt_bn128_g1 data,

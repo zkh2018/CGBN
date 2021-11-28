@@ -40,6 +40,9 @@ void create_stream(CudaStream* stream){
 void sync(CudaStream stream){
   cudaStreamSynchronize(stream);
 }
+void sync_device(){
+  CUDA_CHECK(cudaDeviceSynchronize());
+}
 
 void gpu_reset(){
   cudaDeviceReset();
