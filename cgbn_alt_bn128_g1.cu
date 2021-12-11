@@ -692,12 +692,12 @@ void alt_bn128_g1_reduce_sum2(
   uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
   //uint32_t blocks = (n + instances - 1) / instances;
   //kernel_alt_bn128_g1_reduce_sum2<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
-  test<64, 64><<<64, 512, 0, stream>>>(report, data, out, n-1, max_value, modulus, inv);
+  test<64, 64><<<64, 512>>>(report, data, out, n-1, max_value, modulus, inv);
   const int tmp_n = 64*64; 
-  test<64, 8><<<8, 512, 0, stream>>>(report, out, data, tmp_n, max_value, modulus, inv);
-  test<16, 4><<<4, 128, 0, stream>>>(report, data, out, 64*8, max_value, modulus, inv);
-  test<8, 1><<<1, 64, 0, stream>>>(report, out, data, 64, max_value, modulus, inv);
-  test<1, 1><<<1, 8, 0, stream>>>(report, data, out, 8, max_value, modulus, inv);
+  test<64, 8><<<8, 512>>>(report, out, data, tmp_n, max_value, modulus, inv);
+  test<16, 4><<<4, 128>>>(report, data, out, 64*8, max_value, modulus, inv);
+  test<8, 1><<<1, 64>>>(report, out, data, 64, max_value, modulus, inv);
+  test<1, 1><<<1, 8>>>(report, data, out, 8, max_value, modulus, inv);
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
 

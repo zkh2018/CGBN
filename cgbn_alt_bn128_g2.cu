@@ -40,6 +40,11 @@ void alt_bn128_g2::copy_from_cpu(const alt_bn128_g2& host){
   y.copy_from_cpu(host.y);
   z.copy_from_cpu(host.z);
 }
+void alt_bn128_g2::copy_from_gpu(const alt_bn128_g2& gpu){
+  x.copy_from_gpu(gpu.x);
+  y.copy_from_gpu(gpu.y);
+  z.copy_from_gpu(gpu.z);
+}
 void alt_bn128_g2::copy_to_cpu(alt_bn128_g2& host){
   host.x.copy_to_cpu(x);
   host.y.copy_to_cpu(y);
@@ -238,16 +243,19 @@ int alt_bn128_g2_reduce_sum_one_range(
   uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
   dim3 blocks(block_x, ranges_size, 1);
   kernel_alt_bn128_g2_reduce_sum_pre<<<blocks, threads>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, max_value, field_zero, field_one, density, bn_exponents, inv, field_modulus, field_inv);
+  CUDA_CHECK(cudaDeviceSynchronize());
 
   const int blocks_per_range = REDUCE_BLOCKS_PER_RANGE;
   const int threads_per_block = TPI * INSTANCES_PER_BLOCK;
   kernel_alt_bn128_g2_reduce_sum<<<dim3(blocks_per_range, ranges_size, 1), threads_per_block>>>(report, 0, 0, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, max_value, t_zero, modulus, inv, non_residue);
+  CUDA_CHECK(cudaDeviceSynchronize());
 
   int n = blocks_per_range * INSTANCES_PER_BLOCK * ranges_size;
   while(n>=2){
     int half_n = n / 2;
     int blocks = (half_n + INSTANCES_PER_BLOCK-1) / INSTANCES_PER_BLOCK;
     kernel_alt_bn128_g1_reduce_sum_after<<<blocks, threads_per_block>>>(report, partial, half_n, max_value, modulus, inv, non_residue);
+    CUDA_CHECK(cudaDeviceSynchronize());
     n /= 2;
   }
   return 0;
@@ -266,6 +274,7 @@ __global__ void test_g2(
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int instance = tid / TPI;
   int local_instance = threadIdx.x / TPI;
+  if(instance >= n) return;
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
   __shared__ uint32_t cache_buffer[BlockSize*8];
@@ -279,13 +288,15 @@ __global__ void test_g2(
   dev_non_residue.load(bn_env, non_residue, 0);
 
   DevAltBn128G2 a;
-  a.load(bn_env, data, instance);
+  if(instance < n)
+    a.load(bn_env, data, instance);
   for(int i = instance + BlockNum*BlockSize; i < n; i+=BlockNum*BlockSize){
     DevAltBn128G2 b;
     b.load(bn_env, data, i);
     dev_alt_bn128_g2_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv, dev_non_residue);
   }
-  a.store(bn_env, out, instance);
+  if(instance < n)
+    a.store(bn_env, out, instance);
 }
 void alt_bn128_g2_reduce_sum2(
     alt_bn128_g2 data, 
@@ -296,16 +307,22 @@ void alt_bn128_g2_reduce_sum2(
     Fp_model non_residue, 
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
-  uint32_t threads = 512;
-  uint32_t local_instances = threads / TPI;//64
-  uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
+  //uint32_t threads = 512;
+  //uint32_t local_instances = threads / TPI;//64
+  //uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
   //uint32_t blocks = (n + instances - 1) / instances;
   //kernel_alt_bn128_g1_reduce_sum2<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
-  test_g2<32, 128><<<128, 256, 0, stream>>>(report, data, out, n-1, max_value, modulus, inv, non_residue);
-  const int tmp_n = 32*128; 
-  test_g2<32, 16><<<16, 256, 0, stream>>>(report, out, data, tmp_n, max_value, modulus, inv, non_residue);
-  test_g2<16, 4><<<4, 128, 0, stream>>>(report, data, out, 32*16, max_value, modulus, inv, non_residue);
-  test_g2<8, 1><<<1, 64, 0, stream>>>(report, out, data, 64, max_value, modulus, inv, non_residue);
-  test_g2<1, 1><<<1, 8, 0, stream>>>(report, data, out, 8, max_value, modulus, inv, non_residue);
+
+  test_g2<32, 128><<<128, 256>>>(report, data, out, n-1, max_value, modulus, inv, non_residue);
+  CUDA_CHECK(cudaDeviceSynchronize());
+  int tmp_n = 32*128; 
+  test_g2<32, 16><<<16, 256>>>(report, out, data, tmp_n, max_value, modulus, inv, non_residue);
+  CUDA_CHECK(cudaDeviceSynchronize());
+  test_g2<16, 4><<<4, 128>>>(report, data, out, 32*16, max_value, modulus, inv, non_residue);
+  CUDA_CHECK(cudaDeviceSynchronize());
+  test_g2<8, 1><<<1, 64>>>(report, out, data, 64, max_value, modulus, inv, non_residue);
+  CUDA_CHECK(cudaDeviceSynchronize());
+  test_g2<1, 1><<<1, 8>>>(report, data, out, 8, max_value, modulus, inv, non_residue);
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 }//namespace gpu

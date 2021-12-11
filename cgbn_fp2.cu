@@ -38,6 +38,10 @@ void Fp_model2::copy_from_cpu(const Fp_model2& fp){
   c0.copy_from_cpu(fp.c0);
   c1.copy_from_cpu(fp.c1);
 }
+void Fp_model2::copy_from_gpu(const Fp_model2& fp){
+  c0.copy_from_gpu(fp.c0);
+  c1.copy_from_gpu(fp.c1);
+}
 void Fp_model2::copy_to_cpu(Fp_model2& fp){
   c0.copy_to_cpu(fp.c0);
   c1.copy_to_cpu(fp.c1);

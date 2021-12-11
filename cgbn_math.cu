@@ -16,29 +16,41 @@ namespace gpu{
 void gpu_malloc(void** ptr, size_t size){
   CUDA_CHECK(cudaMalloc(ptr, size));
   CUDA_CHECK(cudaMemset(*ptr, 0, size));
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 void gpu_set_zero(void* ptr, size_t size, CudaStream stream){
-  CUDA_CHECK(cudaMemsetAsync(ptr, 0, size, stream));
+  //CUDA_CHECK(cudaMemsetAsync(ptr, 0, size, stream));
+  CUDA_CHECK(cudaMemset(ptr, 0, size));
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 void gpu_free(void* ptr){
   CUDA_CHECK(cudaFree(ptr));
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 void copy_cpu_to_gpu(void* dst, const void* src, size_t size, CudaStream stream){
-  CUDA_CHECK(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice, stream));
+  //CUDA_CHECK(cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice, stream));
+  CUDA_CHECK(cudaMemcpy(dst, src, size, cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 void copy_gpu_to_cpu(void* dst, const void* src, size_t size, CudaStream stream){
-  CUDA_CHECK(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToHost, stream));
+  //CUDA_CHECK(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToHost, stream));
+  CUDA_CHECK(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 void copy_gpu_to_gpu(void* dst, const void* src, size_t size, CudaStream stream){
-  CUDA_CHECK(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice, stream));
+  //CUDA_CHECK(cudaMemcpyAsync(dst, src, size, cudaMemcpyDeviceToDevice, stream));
+  CUDA_CHECK(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToDevice));
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void create_stream(CudaStream* stream){
   cudaStreamCreate(stream);
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void sync(CudaStream stream){
   cudaStreamSynchronize(stream);
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 void sync_device(){
   CUDA_CHECK(cudaDeviceSynchronize());

@@ -16,6 +16,7 @@ struct Fp_model2 {
   void release();
   void release_host();
   void copy_from_cpu(const Fp_model2& fp);
+  void copy_from_gpu(const Fp_model2& fp);
   void copy_to_cpu(Fp_model2& fp);
   void clear(CudaStream stream = 0);
 };
