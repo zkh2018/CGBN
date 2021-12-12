@@ -27,6 +27,12 @@ void copy_cpu_to_gpu(void* dst, const void* src, size_t size, CudaStream stream 
 void copy_gpu_to_cpu(void* dst, const void* src, size_t size, CudaStream stream = 0);
 void copy_gpu_to_gpu(void* dst, const void* src, size_t size, CudaStream stream = 0);
 
+struct gpu_meta{
+  void *ptr;
+  size_t size = 0;
+  void resize(const size_t _size);
+  void release();
+};
 
 struct gpu_buffer{
   int total_n;

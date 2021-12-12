@@ -60,6 +60,18 @@ void gpu_reset(){
   cudaDeviceReset();
 }
 
+void gpu_meta::resize(const size_t _size){
+  if(_size > this->size){
+    if(this->size > 0){
+      gpu_free(this->ptr);
+    }
+    gpu_malloc(&ptr, _size);
+    this->size = _size;
+  }
+}
+void gpu_meta::release(){
+  gpu_free(ptr);
+}
 
 void gpu_buffer::resize(int new_n){
   if(total_n == 0){

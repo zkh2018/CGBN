@@ -164,7 +164,7 @@ void split_to_bucket_g2(
 
   if(false){
     kernel_split_to_bucket_g2<<<blocks, threads>>>(data, out, density, bn_exponents, c, k, data_length, indexs);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
   }else{
     const int bucket_num = 1<<c;
     int *tids, *ids, *sorted_tids;
@@ -172,31 +172,32 @@ void split_to_bucket_g2(
     cudaMalloc((void**)&sorted_tids, data_length * sizeof(int));
     //1 get tids
     kernel_split_to_bucket_g2<<<blocks, threads>>>(data, out, density, bn_exponents, c, k, data_length, indexs, tids);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
     //2. sort
     int real_n = 0;
     cudaMemcpy(&real_n, indexs + bucket_num -1, sizeof(int), cudaMemcpyDeviceToHost);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
     cudaMemcpy(starts + bucket_num, indexs + bucket_num - 1, sizeof(int), cudaMemcpyDeviceToDevice);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
     void     *d_temp_storage = NULL;
     size_t   temp_storage_bytes = 0;
     cub::DeviceSegmentedRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, tids, sorted_tids,
         real_n, 1<<c, starts, starts + 1);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
     // Allocate temporary storage
     cudaMalloc(&d_temp_storage, temp_storage_bytes);
     // Run sorting operation
     cub::DeviceSegmentedRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, tids, sorted_tids,
         real_n, 1<<c, starts, starts+ 1);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
 
     //3. split 
     blocks = (real_n + threads-1)/threads;
     kernel_split_to_bucket_g2<<<blocks, threads>>>(data, out, c, k, real_n, sorted_tids);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
     cudaFree(tids);
     cudaFree(d_temp_storage);
+    cudaFree(sorted_tids);
   }
 }
 
@@ -316,13 +317,10 @@ __global__ void kernel_small_bucket_reduce_sum_g2(
 #define LITTLE_BUCKET_REDUCE_G2(left, right){\
     cudaMemset(tmp_num, 0, sizeof(int));\
     kernel_get_bucket_g2<left, right><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);\
-    CUDA_CHECK(cudaDeviceSynchronize());\
     cudaMemcpy(&little_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);\
-    CUDA_CHECK(cudaDeviceSynchronize());\
     if(little_num > 0){\
       blocks = (little_num + local_instances-1) / local_instances;\
       kernel_small_bucket_reduce_sum_g2<local_instances, BUCKET_INSTANCES_G2><<<blocks, threads2>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, little_num, max_value, t_zero, modulus, inv, non_residue);\
-      CUDA_CHECK(cudaDeviceSynchronize());\
     }\
 }
 
@@ -387,12 +385,9 @@ __global__ void kernel_medium_bucket_reduce_sum_g2(
 #define LARGE_BUCKET_REDUCE_G2(left, right, instances){\
     cudaMemset(tmp_num, 0, sizeof(int));\
     kernel_get_bucket_g2<left, right><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);\
-    CUDA_CHECK(cudaDeviceSynchronize());\
     cudaMemcpy(&large_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);\
-    CUDA_CHECK(cudaDeviceSynchronize());\
     if(large_num > 0){ \
       kernel_medium_bucket_reduce_sum_g2<instances, BUCKET_INSTANCES_G2><<<large_num, instances*8>>>(report, data, tmp_starts, tmp_ends, tmp_ids, buckets, max_value, t_zero, modulus, inv, non_residue);\
-      CUDA_CHECK(cudaDeviceSynchronize());\
     }\
 }
 
@@ -557,17 +552,17 @@ void bucket_reduce_sum_g2(
       int *tmp_num = ids + bucket_num;
 
       cudaMemset(tmp_num, 0, sizeof(int));
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
       kernel_get_bucket_g2<0, 1><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
       cudaMemcpy(&one_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
 
       int threads = 512;
       int blocks = (one_num + 511) / 512;
       if(one_num > 0){
         kernel_one_bucket_reduce_sum_g2<BUCKET_INSTANCES_G2><<<blocks, threads>>>(data, tmp_starts, tmp_ids, buckets, one_num);
-        CUDA_CHECK(cudaDeviceSynchronize());
+        //CUDA_CHECK(cudaDeviceSynchronize());
       }
 
       ///////////////////////////////////////////
@@ -595,7 +590,7 @@ void bucket_reduce_sum_g2(
       //LARGE_BUCKET_REDUCE_G2(256, 512, 32);
       //LARGE_BUCKET_REDUCE_G2(512, 1024, 32);
       //LARGE_BUCKET_REDUCE_G2(1024, 1024000, 32);
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
     }else{
       const int threads = TPI;//BUCKET_INSTANCES_G2 * TPI;
       const int blocks = bucket_num;
@@ -632,7 +627,7 @@ void reverse_g2(alt_bn128_g2 in, alt_bn128_g2 out, const int n, const int offset
   const int threads = 512;
   int reverse_blocks = (n + threads - 1) / threads;
   kernel_reverse_g2<<<reverse_blocks, threads>>>(in, out, n, offset);
-  CUDA_CHECK(cudaDeviceSynchronize());
+  //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 template<int Instances, int ReduceDepthPerBlock>
@@ -854,37 +849,37 @@ void prefix_sum_g2(
       int instances = 32 / stride;
       int threads = instances * TPI;
       kernel_prefix_sum_pre_g2<32, 64><<<prefix_sum_blocks, threads>>>(report, data, n, max_value, modulus, inv, non_residue, stride);
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
     }
     for(int stride = 16; stride > 0; stride /= 2){
       int instances = 32 / stride;
       int threads = instances * TPI;
       bool save_block_sum = (stride == 1);
       kernel_prefix_sum_post_g2<32, 64><<<prefix_sum_blocks, threads>>>(report, data, block_sums, n, max_value, modulus, inv, non_residue, stride, save_block_sum);
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
     }
 
     for(int stride = 1; stride <= 32; stride *= 2){
       int instances = 32 / stride;
       int threads = instances * TPI;
       kernel_prefix_sum_pre_g2<32, 64><<<prefix_sum_blocks2, threads>>>(report, block_sums, prefix_sum_blocks, max_value, modulus, inv, non_residue, stride);
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
     }
     for(int stride = 16; stride > 0; stride /= 2){
       int instances = 32 / stride;
       int threads = instances * TPI;
       bool save_block_sum = (stride == 1);
       kernel_prefix_sum_post_g2<32, 64><<<prefix_sum_blocks2, threads>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv, non_residue, stride, save_block_sum);
-      CUDA_CHECK(cudaDeviceSynchronize());
+      //CUDA_CHECK(cudaDeviceSynchronize());
     }
 
     //kernel_prefix_sum<64, 32, true><<<prefix_sum_blocks2, threads/2, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv);
     kernel_prefix_sum_g2<16, 8, false><<<1, 64>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, max_value, modulus, inv, non_residue);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
     kernel_add_block_sum_g2<64><<<prefix_sum_blocks2-1, threads>>>(report, block_sums, block_sums2, prefix_sum_blocks, max_value, modulus, inv, non_residue);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
     kernel_add_block_sum_g2<64><<<prefix_sum_blocks-1, threads>>>(report, data, block_sums, n, max_value, modulus, inv, non_residue);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
   }else{
     kernel_prefix_sum_g2_test<<<1, 8>>>(report, data, n, max_value, modulus, inv, non_residue);
   }

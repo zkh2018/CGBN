@@ -13,6 +13,8 @@ struct Fp_model2 {
   Fp_model2(const int count);
   void init(const int count);
   void init_host(const int count);
+  void resize(const int count);
+  void resize_host(const int count);
   void release();
   void release_host();
   void copy_from_cpu(const Fp_model2& fp);

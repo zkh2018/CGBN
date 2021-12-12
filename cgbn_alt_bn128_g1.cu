@@ -26,6 +26,16 @@ void alt_bn128_g1::init_host(const int count){
   y.init_host(count);
   z.init_host(count);
 }
+void alt_bn128_g1::resize(const int count){
+  x.resize(count);
+  y.resize(count);
+  z.resize(count);
+}
+void alt_bn128_g1::resize_host(const int count){
+  x.resize_host(count);
+  y.resize_host(count);
+  z.resize_host(count);
+}
 void alt_bn128_g1::release(){
   x.release();
   y.release();
@@ -713,8 +723,9 @@ __global__ void kernel_warmup(){
   }
 }
 void warm_up(){
-  kernel_warmup<<<1, 1>>>();
-  CUDA_CHECK(cudaDeviceSynchronize());
+  //kernel_warmup<<<1, 1>>>();
+  //CUDA_CHECK(cudaDeviceSynchronize());
+  cudaFree(0);
 }
 
 } //gpu

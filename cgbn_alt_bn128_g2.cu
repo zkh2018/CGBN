@@ -25,6 +25,16 @@ void alt_bn128_g2::init_host(const int count){
   y.init_host(count);
   z.init_host(count);
 }
+void alt_bn128_g2::resize(const int count){
+  x.resize(count);
+  y.resize(count);
+  z.resize(count);
+}
+void alt_bn128_g2::resize_host(const int count){
+  x.resize_host(count);
+  y.resize_host(count);
+  z.resize_host(count);
+}
 void alt_bn128_g2::release(){
   x.release();
   y.release();

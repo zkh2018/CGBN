@@ -24,6 +24,14 @@ void Fp_model2::init_host(const int count){
   c0.init_host(count);
   c1.init_host(count);
 }
+void Fp_model2::resize(const int count){
+  c0.resize(count);
+  c1.resize(count);
+}
+void Fp_model2::resize_host(const int count){
+  c0.resize_host(count);
+  c1.resize_host(count);
+}
 
 void Fp_model2::release(){
   c0.release();
