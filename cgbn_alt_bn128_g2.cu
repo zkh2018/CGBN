@@ -143,6 +143,7 @@ __global__ void kernel_alt_bn128_g2_reduce_sum_pre(
 __global__ void kernel_alt_bn128_g1_reduce_sum_after(
     cgbn_error_report_t* report, 
     alt_bn128_g2 partial, 
+    const int half_n, 
     const int n, 
     cgbn_mem_t<BITS>* max_value,
     cgbn_mem_t<BITS>* modulus, const uint64_t inv,
@@ -151,7 +152,7 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_after(
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int local_instance = threadIdx.x / TPI;
   int instance = tid / TPI;
-  if(instance >= n) return;
+  if(instance >= half_n) return;
 
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
@@ -168,9 +169,11 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_after(
 
   DevAltBn128G2 result;
   result.load(bn_env, partial, instance);
-  DevAltBn128G2 dev_b;
-  dev_b.load(bn_env, partial, instance + n);
-  dev_alt_bn128_g2_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv, dev_non_residue);
+  for(int i = half_n; i < n; i+= half_n){
+	  DevAltBn128G2 dev_b;
+	  dev_b.load(bn_env, partial, instance + i);
+	  dev_alt_bn128_g2_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv, dev_non_residue);
+  }
   result.store(bn_env, partial, instance);
 }
 
@@ -264,7 +267,7 @@ int alt_bn128_g2_reduce_sum_one_range(
   while(n>=2){
     int half_n = n / 2;
     int blocks = (half_n + INSTANCES_PER_BLOCK-1) / INSTANCES_PER_BLOCK;
-    kernel_alt_bn128_g1_reduce_sum_after<<<blocks, threads_per_block>>>(report, partial, half_n, max_value, modulus, inv, non_residue);
+    kernel_alt_bn128_g1_reduce_sum_after<<<blocks, threads_per_block>>>(report, partial, half_n, n, max_value, modulus, inv, non_residue);
     CUDA_CHECK(cudaDeviceSynchronize());
     n /= 2;
   }

@@ -16,5 +16,5 @@ source_group("Include" FILES ${CURRENT_HEADERS})
 source_group("Source" FILES ${CURRENT_SOURCES})
 
 cuda_add_library(cgbn_math SHARED ${CURRENT_HEADERS} ${CURRENT_SOURCES})
-
+#cuda_add_library(cgbn_math STATIC ${CURRENT_HEADERS} ${CURRENT_SOURCES})
 
