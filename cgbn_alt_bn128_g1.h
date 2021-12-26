@@ -61,6 +61,26 @@ int alt_bn128_g1_reduce_sum_one_range(
     cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
     const int max_reduce_depth);
 
+int alt_bn128_g1_reduce_sum_one_range5(
+    alt_bn128_g1 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    uint32_t *counters,
+    char* flags,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    uint32_t *seconds,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv,
+    cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
+    const int max_reduce_depth);
+
 void alt_bn128_g1_reduce_sum(
     alt_bn128_g1 partial_in, 
     const uint32_t *counters_in,

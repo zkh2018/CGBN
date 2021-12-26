@@ -403,6 +403,35 @@ __global__ void kernel_alt_bn128_g1_reduce_sum_one_range4(
   }
   result.store(bn_env, partial, 0);
 }
+__global__ void kernel_alt_bn128_g1_reduce_sum_one_range6(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 partial, 
+    const int n, 
+    const uint32_t* firsts,
+    cgbn_mem_t<BITS>* max_value,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv
+    ){
+  int instance = threadIdx.x / TPI;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  __shared__ uint32_t res[24];
+  __shared__ uint32_t buffer[8];
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+
+  DevAltBn128G1 result;
+  result.load(bn_env, partial, firsts[0]);
+
+  for(int i = 1; i < n; i++){
+    DevAltBn128G1 dev_b;
+    dev_b.load(bn_env, partial, firsts[i]);
+    dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+  }
+  result.store(bn_env, partial, 0);
+}
 
 __global__ void kernel_alt_bn128_g1_reduce_sum(
     cgbn_error_report_t* report, 
@@ -552,6 +581,179 @@ int alt_bn128_g1_reduce_sum(
   printf("kernel time = %fms\n", costtime);
   CGBN_CHECK(report);
   CUDA_CHECK(cgbn_error_report_free(report));
+  return 0;
+}
+
+template<int BlockInstances>
+__global__ void kernel_alt_bn128_g1_reduce_sum_one_range5(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 values, 
+    Fp_model scalars,
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    const int ranges_size, 
+    const int range_id_offset,
+    const uint32_t* firsts,
+    const uint32_t* seconds,
+    char* flags,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv
+    ){
+  const int local_instance = threadIdx.x / TPI;//0~63
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / TPI;
+
+  const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * BlockInstances;
+  const int first = firsts[range_id_offset + blockIdx.y];
+  const int second = seconds[range_id_offset + blockIdx.y];
+  const int reduce_depth = second - first;//30130
+  if(reduce_depth <= 1) return;
+  const int half_depth = (reduce_depth + 1) / 2;
+
+  context_t bn_context(cgbn_report_monitor, report, instance_offset + instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  if(instance >= half_depth) return;
+
+  __shared__ uint32_t cache_res[BlockInstances * 24];
+  uint32_t *res = &cache_res[local_instance * 24];
+  __shared__ uint32_t cache_buffer[BlockInstances * 8];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+
+  DevAltBn128G1 result;
+  if(flags[index_it[first + instance]] == 1){
+	  result.load(bn_env, values, first+instance);
+  }else{
+	  result.load(bn_env, t_zero, 0);
+  }
+  for(int i = first + instance+half_depth; i < first + reduce_depth; i+= half_depth){
+    const int j = index_it[i];
+    if(flags[j] == 1){
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, values, i);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+    }
+  }
+  result.store(bn_env, partial, first + instance);
+}
+
+template<int BlockInstances>
+__global__ void kernel_alt_bn128_g1_reduce_sum_one_range7(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 values, 
+    Fp_model scalars,
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    const int ranges_size, 
+    const int range_id_offset,
+    const uint32_t* firsts,
+    const uint32_t* seconds,
+    char* flags,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv
+    ){
+  const int local_instance = threadIdx.x / TPI;//0~63
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / TPI;
+
+  const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * BlockInstances;
+  const int first = firsts[range_id_offset + blockIdx.y];
+  const int second = seconds[range_id_offset + blockIdx.y];
+  const int reduce_depth = second - first;//30130
+  if(reduce_depth <= 1) return;
+  const int half_depth = (reduce_depth + 1) / 2;
+
+  context_t bn_context(cgbn_report_monitor, report, instance_offset + instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  if(instance >= half_depth) return;
+
+  __shared__ uint32_t cache_res[BlockInstances * 24];
+  uint32_t *res = &cache_res[local_instance * 24];
+  __shared__ uint32_t cache_buffer[BlockInstances * 8];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+
+  DevAltBn128G1 result;
+  //if(flags[index_it[first + instance]] == 1){
+	  result.load(bn_env, values, first+instance);
+  //}else{
+  //        result.load(bn_env, t_zero, 0);
+  //}
+  for(int i = first + instance+half_depth; i < first + reduce_depth; i+= half_depth){
+    //const int j = index_it[i];
+    //if(flags[j] == 1){
+      DevAltBn128G1 dev_b;
+      dev_b.load(bn_env, values, i);
+      dev_alt_bn128_g1_add(bn_env, result, dev_b, &result, res, buffer, local_max_value, local_modulus, inv);
+    //}
+  }
+  result.store(bn_env, partial, first + instance);
+}
+
+__global__ void kernel_update_seconds(const uint32_t *firsts, uint32_t* seconds, const int range_size){
+	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	if(tid < range_size){
+		int first = firsts[tid];
+		int second = seconds[tid];
+		seconds[tid] = first + (second - first + 1) / 2;
+	}
+}
+int alt_bn128_g1_reduce_sum_one_range5(
+    alt_bn128_g1 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    alt_bn128_g1 partial, 
+    uint32_t *counters,
+    char* flags,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    uint32_t *seconds,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv,
+    cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
+    const int max_reduce_depth
+    ){
+  cgbn_error_report_t *report = get_error_report();
+
+  uint32_t threads = 512;
+  const int local_instances = 64 * BlockDepth;
+  uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
+  dim3 blocks(block_x, ranges_size, 1);
+  kernel_alt_bn128_g1_reduce_sum_one_range_pre<<<blocks, threads>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, max_value, field_zero, field_one, density, bn_exponents, inv, field_modulus, field_inv);
+
+  int n = max_reduce_depth;
+  const int local_instances2 = 32;
+  threads = local_instances2 * TPI;
+  uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
+  dim3 blocks2(block_x2, ranges_size, 1);
+  kernel_alt_bn128_g1_reduce_sum_one_range5<local_instances2><<<blocks2, dim3(threads, 1, 1)>>>(report, values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, max_value, t_zero, modulus, inv);
+  const int update_threads = 64;
+  const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
+  kernel_update_seconds<<<update_blocks, update_threads>>>(firsts, seconds, ranges_size);
+  CUDA_CHECK(cudaDeviceSynchronize());
+  n = (n+1)/2;
+  while(n>=2){
+	  uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
+	  dim3 blocks2(block_x2, ranges_size, 1);
+	  kernel_alt_bn128_g1_reduce_sum_one_range7<local_instances2><<<blocks2, dim3(threads, 1, 1)>>>(report, partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, max_value, t_zero, modulus, inv);
+	  //CUDA_CHECK(cudaDeviceSynchronize());
+	  kernel_update_seconds<<<update_blocks, update_threads>>>(firsts, seconds, ranges_size);
+	  //CUDA_CHECK(cudaDeviceSynchronize());
+	  n = (n+1)/2;
+  }
+  kernel_alt_bn128_g1_reduce_sum_one_range6<<<1, TPI>>>(report, partial, ranges_size, firsts, max_value, modulus, inv);
+  //CUDA_CHECK(cudaDeviceSynchronize());
   return 0;
 }
 
