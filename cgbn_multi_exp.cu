@@ -261,6 +261,56 @@ __global__ void kernel_split_to_bucket(
     }
   }
 }
+template<int BS, int Offset>
+__global__ void kernel_bucket_reduce_sum_one_instance(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 data,
+    int* starts, int* ends,
+    const int bucket_num,
+    alt_bn128_g1 buckets,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv){
+  int tid = threadIdx.x;
+  int bucket_id = blockIdx.x;
+  int instance = tid / TPI;
+  int local_instance = instance;//threadIdx.x / TPI;
+  int start = starts[bucket_id];
+  int end = ends[bucket_id];
+  int n = end - start;
+  //if(n <= 1) return;
+
+  context_t bn_context(cgbn_report_monitor, report, bucket_id * BS + instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  __shared__ uint32_t cache_res[BS * 3 * BITS/32];
+  uint32_t *res = &cache_res[local_instance * BITS/32 * 3];
+  __shared__ uint32_t cache_buffer[BS * BITS/32];
+  uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+
+  DevAltBn128G1 result;
+  result.load(bn_env, t_zero, 0);
+  for(int i = start + instance; i < end; i+=BS){
+    DevAltBn128G1 other;
+    other.load(bn_env, data, i);
+    dev_alt_bn128_g1_add(bn_env, result, other, &result, res, buffer, local_max_value, local_modulus, inv);
+  }
+  if(instance < n)
+	  result.store(bn_env, data, start + instance);
+  __syncthreads();
+  if(instance == 0){
+	 for(int i = 1; i < BS && i < n; i++){
+		 DevAltBn128G1 other;
+		 other.load(bn_env, data, start + i);
+		 dev_alt_bn128_g1_add(bn_env, result, other, &result, res, buffer, local_max_value, local_modulus, inv);
+	 } 
+	 result.store(bn_env, buckets, bucket_id * Offset);
+  }
+  //result.store(bn_env, data, start);
+}
 
 template<int BS>
 __global__ void kernel_bucket_reduce_sum(
@@ -593,6 +643,67 @@ void prefix_sum(const int *in, int *out, const int n, CudaStream stream){
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
+__global__ void kernel_get_bid_and_counter(
+    const cgbn_mem_t<BITS>* bn_exponents,
+    const int c, const int k,
+    const int data_length,
+    const int bucket_num,
+    int* bucket_counters,
+    int* bucket_ids, int* value_ids){
+  int tid = threadIdx.x + blockDim.x * blockIdx.x;
+  for(int i = tid; i < data_length; i+= gridDim.x * blockDim.x){
+    size_t id = dev_get_id(c, k*c, (uint64_t*)bn_exponents[i]._limbs);
+    if(id >= bucket_num) printf("error bucket_id\n");
+    if(id != 0){
+      atomicAdd(&bucket_counters[id], 1);
+      bucket_ids[i] = id;
+      value_ids[i] = i;
+    }else{
+        bucket_ids[i] = bucket_num+1;
+        value_ids[i] = i;
+    }
+  }
+}
+__global__ void kernel_calc_bucket_index(
+		const int *bucket_ids, 
+		const int *starts, 
+		const int *ends,
+		const int bucket_num, int* bucket_index){
+  int tid = threadIdx.x + blockDim.x * blockIdx.x;
+  for(int i = tid + 1; i < bucket_num; i+= gridDim.x * blockDim.x){
+	int start = starts[i]; 
+	int end = ends[i];
+	for(int j = start; j < end; j++){
+		bucket_index[j] = j - start;
+	}
+  }
+}
+
+__global__ void kernel_split_to_bucket(
+		alt_bn128_g1 data,
+		alt_bn128_g1 buckets,
+		const int data_length,
+		const int bucket_num,
+		const int* starts,
+		const int* value_ids,
+		const int* bucket_ids,
+		const int *bucket_index){
+	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	if(tid >= data_length) return;
+	int bucket_id = bucket_ids[tid];
+	if(bucket_id > 0 && bucket_id < bucket_num){
+		int src_i = value_ids[tid];
+		int dst_i = tid;//starts[bucket_id] + bucket_index[tid];
+//#pragma unroll
+		for(int j = 0; j < 8; j++){
+			buckets.x.mont_repr_data[dst_i]._limbs[j] = data.x.mont_repr_data[src_i]._limbs[j];
+			buckets.y.mont_repr_data[dst_i]._limbs[j] = data.y.mont_repr_data[src_i]._limbs[j];
+			buckets.z.mont_repr_data[dst_i]._limbs[j] = data.z.mont_repr_data[src_i]._limbs[j];
+		}
+
+	}
+}
+
 void split_to_bucket(
     alt_bn128_g1 data, 
     alt_bn128_g1 out, 
@@ -607,6 +718,33 @@ void split_to_bucket(
   int blocks = (data_length + threads-1) / threads;
 
   if(true){
+	  const int bucket_num = (1<<c);
+	  //cudaMemset(starts, 0, sizeof(int) * bucket_num);
+	  int *bucket_ids, *value_ids, *bucket_index;
+	  CUDA_CHECK(cudaMalloc((void**)&bucket_ids, sizeof(int) * data_length));
+	  CUDA_CHECK(cudaMalloc((void**)&value_ids, sizeof(int) * data_length));
+	  //CUDA_CHECK(cudaMalloc((void**)&bucket_index, sizeof(int) * data_length));
+	  kernel_get_bid_and_counter<<<blocks, threads>>>(bn_exponents, c, k, data_length, bucket_num, indexs, bucket_ids, value_ids); 
+	  CUDA_CHECK(cudaDeviceSynchronize());
+	  thrust::sort_by_key(thrust::device, bucket_ids, bucket_ids + data_length, value_ids); 
+	  CUDA_CHECK(cudaDeviceSynchronize());
+	  //prefix_sum(starts, indexs, bucket_num, stream);
+	  //const int blocks2 = (bucket_num + threads - 1) / threads;
+	  //kernel_calc_bucket_index<<<blocks2, threads>>>(bucket_ids, starts, indexs, bucket_num, bucket_index);
+	  //CUDA_CHECK(cudaDeviceSynchronize());
+      
+	  kernel_split_to_bucket<<<blocks, threads>>>(data, out, data_length, bucket_num, starts, value_ids, bucket_ids, bucket_index);
+	  //CUDA_CHECK(cudaDeviceSynchronize());
+    //int real_n = 0;
+    //cudaMemcpy(&real_n, indexs + bucket_num -1, sizeof(int), cudaMemcpyDeviceToHost);
+    //blocks = (real_n + threads-1)/threads;
+    //kernel_split_to_bucket<<<blocks, threads>>>(data, out, c, k, real_n, value_ids);
+	  cudaFree(bucket_ids);
+	  cudaFree(value_ids);
+	  //cudaFree(bucket_index);
+  }
+
+  if(false){
     const int bucket_num = 1<<c;
     int *tids, *sorted_tids;
     cudaMalloc((void**)&tids, data_length * sizeof(int));
@@ -629,7 +767,19 @@ void split_to_bucket(
     cudaMalloc(&d_temp_storage, temp_storage_bytes);
     // Run sorting operation
     cub::DeviceSegmentedRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, tids, sorted_tids,
-        real_n, 1<<c, starts, starts+ 1);
+            real_n, 1<<c, starts, starts+ 1);
+    
+    //std::vector<int> ids1(data_length), ids2(data_length);
+    //cudaMemcpy(ids1.data(), value_ids, data_length*sizeof(int), cudaMemcpyDeviceToHost);
+    //cudaMemcpy(ids2.data(), sorted_tids, data_length*sizeof(int), cudaMemcpyDeviceToHost);
+    //for(int i = 0; i < real_n; i++){
+    //    if(ids1[i] != ids2[i]){
+    //        printf("compare id failed %d\n", i);
+    //        break;
+    //    }
+    //}
+    //printf("compare id success\n");
+
     //3. split 
     blocks = (real_n + threads-1)/threads;
     kernel_split_to_bucket<<<blocks, threads>>>(data, out, c, k, real_n, sorted_tids);
@@ -637,7 +787,8 @@ void split_to_bucket(
     cudaFree(tids);
     cudaFree(sorted_tids);
     cudaFree(d_temp_storage);
-  }else{
+  }
+  if(false){
     if(with_density){
       kernel_split_to_bucket<<<blocks, threads>>>(data, out, density, bn_exponents, c, k, data_length, indexs);
     }else{
@@ -714,6 +865,124 @@ __global__ void kernel_bucket_reduce_by_certain_instances(
   }
 }
 
+template<int BlockInstances, int Offset>
+__global__ void kernel_bucket_reduce(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 data,
+    alt_bn128_g1 buckets,
+    const int *starts, 
+    int *ends, 
+    const int bucket_id_offset,
+    const int bucket_num,
+    cgbn_mem_t<BITS>* max_value,
+    alt_bn128_g1 t_zero,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv, const int instances){
+    const int bucket_id = bucket_id_offset + blockIdx.y;
+    if(bucket_id >= bucket_num) return;
+    const int start = starts[bucket_id];
+    const int end = ends[bucket_id];
+    const int bucket_size = end - start;
+    if(bucket_size <= 1){
+	    return;
+    }
+    if(instances >= bucket_size) return;
+
+    const int half_bucket_size = (bucket_size + 1) / 2;
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid / TPI; 
+    const int local_instance = threadIdx.x / TPI; 
+    if(instance >= instances) return;
+
+    context_t bn_context(cgbn_report_monitor, report, bucket_id * gridDim.x * BlockInstances + instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+
+    __shared__ uint32_t cache_res[BlockInstances * 24];
+    uint32_t *res = &cache_res[local_instance * 24];
+    __shared__ uint32_t cache_buffer[BlockInstances * 8];
+    uint32_t *buffer = &cache_buffer[local_instance * 8];
+    env_t::cgbn_t local_max_value, local_modulus;
+    cgbn_load(bn_env, local_max_value, max_value);
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    if(instance + half_bucket_size < bucket_size){
+        DevAltBn128G1 result;
+        result.load(bn_env, data, start + instance);
+        DevAltBn128G1 other;
+        other.load(bn_env, data, start + instance + half_bucket_size);
+        dev_alt_bn128_g1_add(bn_env, result, other, &result, res, buffer, local_max_value, local_modulus, inv);
+        result.store(bn_env, data, start + instance);
+    }
+}
+__global__ void kernel_update_bucket_ends(const int* starts, int* ends, const int bucket_num, const int instances){
+	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	if(tid < bucket_num){
+		const int start = starts[tid];
+		int bucket_size = ends[tid] - start;
+        //int half_bucket_size = (bucket_size + 1) / 2;
+		if(instances < bucket_size){
+			ends[tid] = instances;
+		}
+	}
+}	
+
+template<int Offset>
+__global__ void kernel_copy(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 data,
+    int* starts, 
+    int* ends, 
+    alt_bn128_g1 buckets,
+    alt_bn128_g1 zero,
+    const int bucket_num){
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / TPI;
+  if(instance >= bucket_num) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  int bid = instance;
+  int start = starts[bid];
+  int end = ends[bid];
+  if(end - start == 0){
+      DevAltBn128G1 dev_zero;
+      dev_zero.load(bn_env, zero, 0);
+      dev_zero.store(bn_env, buckets, bid * Offset);
+  }else{
+      DevAltBn128G1 a;
+      a.load(bn_env, data, start);
+      a.store(bn_env, buckets, bid * Offset);
+  }
+}
+
+__global__ void kernel_get_max_bucket_size(const int *starts, const int *ends, int* max_bucket_size, const int bucket_num){
+	int tid = threadIdx.x;
+	__shared__ int buffer[512];
+	if(tid < bucket_num){
+		buffer[tid] = ends[tid] - starts[tid];
+	}else{
+		buffer[tid] = 0;
+	}
+	for(int i = tid + 512; i < bucket_num; i+=512){
+		int tmp = ends[i] - starts[i];
+		if(buffer[tid] < tmp){
+			buffer[tid] = tmp;
+		}
+	}
+	__syncthreads();
+	int n = 512;
+	while(n > 1){
+		n /= 2;
+		if(tid < n){
+			if(buffer[tid] < buffer[tid + n]){
+				buffer[tid] = buffer[tid + n];
+			}
+		}
+		__syncthreads();
+	}
+	if(tid == 0){
+		max_bucket_size[0] = buffer[0];
+	}
+}
+
 __global__ void kernel_reverse(
       alt_bn128_g1 data,
       int* starts,
@@ -732,6 +1001,21 @@ __global__ void kernel_reverse(
     }
 }
 
+__global__ void kernel_init_buckets(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 data,
+    alt_bn128_g1 zero,
+    const int bucket_num){
+	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	int instance = tid / TPI;
+	if(instance >= bucket_num) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  DevAltBn128G1 dev_zero;
+  dev_zero.load(bn_env, zero, 0);
+  dev_zero.store(bn_env, data, instance);
+}
+
 void bucket_reduce_sum(
     alt_bn128_g1 data,
     int* starts, int* ends, int* ids,
@@ -747,8 +1031,47 @@ void bucket_reduce_sum(
   //int *d_instance_bucket_ids, *d_instances;
   //cudaMalloc((void**)&d_instance_bucket_ids, sizeof(int) * data_size);
   //cudaMalloc((void**)&d_instances, sizeof(int));
+  if(false){
+    const int local_instances = 16;
+    const int threads = local_instances * TPI;
+    const int blocks = (bucket_num + local_instances - 1) / local_instances;
+    kernel_bucket_reduce_sum_one_instance<local_instances, BUCKET_INSTANCES><<<bucket_num, threads>>>(report, data, starts, ends, bucket_num, buckets, max_value, t_zero, modulus, inv);
+    //kernel_copy<BUCKET_INSTANCES><<<blocks, threads>>>(report, data, starts, buckets, bucket_num);
+  }
+  if(false){
+	  int *d_max_bucket_size = d_instance_bucket_ids;
+	  kernel_get_max_bucket_size<<<1, 512>>>(starts, ends, d_max_bucket_size, bucket_num);
+	  CUDA_CHECK(cudaDeviceSynchronize());
+	  int max_bucket_size = 0;
+	  cudaMemcpy(&max_bucket_size, d_max_bucket_size, sizeof(int), cudaMemcpyDeviceToHost);
+
+	  const int update_threads = 512;
+	  const int update_blocks = (bucket_num + update_threads - 1) / update_threads;
+	  const int local_instances = 16;
+	  const int threads = local_instances * TPI;
+	  while(max_bucket_size >= 2){
+          const int half_bucket_size = (max_bucket_size + 1) / 2;
+		  const int block_x = (half_bucket_size + local_instances - 1) / local_instances;
+		  const dim3 blocks(block_x, bucket_num / 2, 1); 
+		  for(int i = 0; i < bucket_num; i+= bucket_num/2){
+		  	kernel_bucket_reduce<local_instances, BUCKET_INSTANCES><<<blocks, threads>>>(report, data, buckets, starts, ends, i, bucket_num, max_value, t_zero, modulus, inv, half_bucket_size);
+          }
+          kernel_update_bucket_ends<<<update_blocks, update_threads>>>(starts, ends, bucket_num, half_bucket_size);
+		  CUDA_CHECK(cudaDeviceSynchronize());
+		  max_bucket_size = half_bucket_size;
+	  }
+      const int copy_blocks = (bucket_num + local_instances - 1) / local_instances; 
+	  kernel_copy<BUCKET_INSTANCES><<<copy_blocks, threads>>>(report, data, starts, ends, buckets, t_zero, bucket_num);
+	  CUDA_CHECK(cudaDeviceSynchronize());
+  }
+
+  if(true){
+	  const int init_blocks = (bucket_num * BUCKET_INSTANCES) / 64;
+	  //kernel_init_buckets<<<init_blocks, 512>>>(report, buckets, t_zero, bucket_num * BUCKET_INSTANCES);
+
   std::vector<std::vector<int>> sections = {
-                    {128, 10240000}};
+                    {128, 10240000}
+  };
   int *d_instances = d_instance_bucket_ids + data_size;
   for(int i = 0; i < sections.size(); i++){
     int left = sections[i][0];
@@ -773,7 +1096,6 @@ void bucket_reduce_sum(
     }
   }
 
-  if(true){
     int one_num = 0, little_num = 0, large_num = 0;
     int *tmp_starts = starts + bucket_num;
     int *tmp_ends = ends + bucket_num;
@@ -783,7 +1105,7 @@ void bucket_reduce_sum(
     cudaMemset(tmp_num, 0, sizeof(int));
     kernel_get_bucket<0, 1><<<(bucket_num + 511) / 512, 512>>>(starts, ends, tmp_starts, tmp_ends, tmp_ids, tmp_num, bucket_num);
     cudaMemcpy(&one_num, tmp_num, sizeof(int), cudaMemcpyDeviceToHost);
-    //CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     int threads = 512;
     int blocks = (one_num + 511) / 512;
