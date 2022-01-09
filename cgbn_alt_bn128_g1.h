@@ -79,7 +79,8 @@ int alt_bn128_g1_reduce_sum_one_range5(
     cgbn_mem_t<BITS>* bn_exponents,
     cgbn_mem_t<BITS>* modulus, const uint64_t inv,
     cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
-    const int max_reduce_depth);
+    const int max_reduce_depth,
+    cudaStream_t stream);
 
 void alt_bn128_g1_reduce_sum(
     alt_bn128_g1 partial_in, 

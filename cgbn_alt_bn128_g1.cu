@@ -722,7 +722,7 @@ int alt_bn128_g1_reduce_sum_one_range5(
     cgbn_mem_t<BITS>* bn_exponents,
     cgbn_mem_t<BITS>* modulus, const uint64_t inv,
     cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
-    const int max_reduce_depth
+    const int max_reduce_depth, cudaStream_t stream
     ){
   cgbn_error_report_t *report = get_error_report();
 
@@ -730,29 +730,29 @@ int alt_bn128_g1_reduce_sum_one_range5(
   const int local_instances = 64 * BlockDepth;
   uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
   dim3 blocks(block_x, ranges_size, 1);
-  kernel_alt_bn128_g1_reduce_sum_one_range_pre<<<blocks, threads>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, max_value, field_zero, field_one, density, bn_exponents, inv, field_modulus, field_inv);
+  kernel_alt_bn128_g1_reduce_sum_one_range_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, max_value, field_zero, field_one, density, bn_exponents, inv, field_modulus, field_inv);
 
   int n = max_reduce_depth;
   const int local_instances2 = 32;
   threads = local_instances2 * TPI;
   uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
   dim3 blocks2(block_x2, ranges_size, 1);
-  kernel_alt_bn128_g1_reduce_sum_one_range5<local_instances2><<<blocks2, dim3(threads, 1, 1)>>>(report, values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, max_value, t_zero, modulus, inv);
+  kernel_alt_bn128_g1_reduce_sum_one_range5<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(report, values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, max_value, t_zero, modulus, inv);
   const int update_threads = 64;
   const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
-  kernel_update_seconds<<<update_blocks, update_threads>>>(firsts, seconds, ranges_size);
-  CUDA_CHECK(cudaDeviceSynchronize());
+  kernel_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
+  //CUDA_CHECK(cudaDeviceSynchronize());
   n = (n+1)/2;
   while(n>=2){
 	  uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
 	  dim3 blocks2(block_x2, ranges_size, 1);
-	  kernel_alt_bn128_g1_reduce_sum_one_range7<local_instances2><<<blocks2, dim3(threads, 1, 1)>>>(report, partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, max_value, t_zero, modulus, inv);
+	  kernel_alt_bn128_g1_reduce_sum_one_range7<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(report, partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, max_value, t_zero, modulus, inv);
 	  //CUDA_CHECK(cudaDeviceSynchronize());
-	  kernel_update_seconds<<<update_blocks, update_threads>>>(firsts, seconds, ranges_size);
+	  kernel_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
 	  //CUDA_CHECK(cudaDeviceSynchronize());
 	  n = (n+1)/2;
   }
-  kernel_alt_bn128_g1_reduce_sum_one_range6<<<1, TPI>>>(report, partial, ranges_size, firsts, max_value, modulus, inv);
+  kernel_alt_bn128_g1_reduce_sum_one_range6<<<1, TPI, 0, stream>>>(report, partial, ranges_size, firsts, max_value, modulus, inv);
   //CUDA_CHECK(cudaDeviceSynchronize());
   return 0;
 }
@@ -891,6 +891,41 @@ __global__ void test(
   //  a.store(bn_env, out, blockIdx.x);
   //}
 }
+
+template<int BlockInstances>
+__global__ void kernel_reduce_sum(
+    cgbn_error_report_t* report, 
+    alt_bn128_g1 data, 
+    alt_bn128_g1 out, 
+    const int half_n,
+    const int n,
+    cgbn_mem_t<BITS>* max_value,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv
+    ){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  if(instance >= half_n) return;
+  int local_instance = threadIdx.x / TPI;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  __shared__ uint32_t cache_buffer[BlockInstances*8];
+  __shared__ uint32_t cache_res[BlockInstances*24];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
+  uint32_t *res = &cache_res[local_instance * 24];
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+
+  DevAltBn128G1 a;
+  a.load(bn_env, data, instance);
+  for(int i = instance + half_n; i < n; i+= half_n){
+    DevAltBn128G1 b;
+    b.load(bn_env, data, i);
+    dev_alt_bn128_g1_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv);
+  }
+  a.store(bn_env, out, instance);
+}
+
 void alt_bn128_g1_reduce_sum2(
     alt_bn128_g1 data, 
     alt_bn128_g1 out, 
@@ -899,18 +934,33 @@ void alt_bn128_g1_reduce_sum2(
     cgbn_mem_t<BITS>* modulus, const uint64_t inv, 
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
-  uint32_t threads = 512;
-  uint32_t local_instances = threads / TPI;//64
-  uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
-  //uint32_t blocks = (n + instances - 1) / instances;
-  //kernel_alt_bn128_g1_reduce_sum2<<<blocks, threads>>>(report, data, out, n, max_value, modulus, inv);
-  test<64, 64><<<64, 512>>>(report, data, out, n-1, max_value, modulus, inv);
-  const int tmp_n = 64*64; 
-  test<64, 8><<<8, 512>>>(report, out, data, tmp_n, max_value, modulus, inv);
-  test<16, 4><<<4, 128>>>(report, data, out, 64*8, max_value, modulus, inv);
-  test<8, 1><<<1, 64>>>(report, out, data, 64, max_value, modulus, inv);
-  test<1, 1><<<1, 8>>>(report, data, out, 8, max_value, modulus, inv);
-  //CUDA_CHECK(cudaDeviceSynchronize());
+  if(true){
+    int len = n-1;
+    const int instances = 64;
+    int threads = instances * TPI;
+    int half_len = (len + 1) / 2;
+    int blocks = (half_len + instances - 1) / instances;
+    kernel_reduce_sum<instances><<<blocks, threads, 0, stream>>>(report, data, out, half_len, len, max_value, modulus, inv);
+    len = half_len;
+    while(len > 1){
+        int half_len = (len + 1) / 2;
+        int blocks = (half_len + instances - 1) / instances;
+        kernel_reduce_sum<instances><<<blocks, threads, 0, stream>>>(report, out, out, half_len, len, max_value, modulus, inv);
+        len = half_len;
+    }
+  }
+  if(false){
+      uint32_t threads = 512;
+      uint32_t local_instances = threads / TPI;//64
+      uint32_t instances = std::min(n, (uint32_t)(local_instances * BlockDepth));
+      test<64, 64><<<64, 512, 0, stream>>>(report, data, out, n-1, max_value, modulus, inv);
+      const int tmp_n = 64*64; 
+      test<64, 8><<<8, 512, 0, stream>>>(report, out, data, tmp_n, max_value, modulus, inv);
+      test<16, 4><<<4, 128, 0, stream>>>(report, data, out, 64*8, max_value, modulus, inv);
+      test<8, 1><<<1, 64, 0, stream>>>(report, out, data, 64, max_value, modulus, inv);
+      test<1, 1><<<1, 8, 0, stream>>>(report, data, out, 8, max_value, modulus, inv);
+      //CUDA_CHECK(cudaDeviceSynchronize());
+  }
 }
 
 
