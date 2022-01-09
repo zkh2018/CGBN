@@ -348,6 +348,65 @@ __global__ void kernel_reduce_sum_g2(
   }
   a.store(bn_env, out, instance);
 }
+
+template<int BlockInstances>
+__global__ void kernel_reduce_sum_g2_for_shared(
+    cgbn_error_report_t* report, 
+    alt_bn128_g2 data, 
+    alt_bn128_g2 out, 
+    const int half_n,
+    const int n,
+    cgbn_mem_t<BITS>* max_value,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv,
+    Fp_model non_residue
+    ){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  int local_instance = threadIdx.x / TPI;
+  //if(instance >= half_n) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  __shared__ uint32_t cache_buffer[BlockInstances*8];
+  __shared__ uint32_t cache_res[BlockInstances*24];
+  uint32_t *buffer = &cache_buffer[local_instance * 8];
+  uint32_t *res = &cache_res[local_instance * 24];
+  __shared__ uint32_t cache_data[48 * BlockInstances];
+  env_t::cgbn_t local_max_value, local_modulus;
+  cgbn_load(bn_env, local_max_value, max_value);
+  cgbn_load(bn_env, local_modulus, modulus);
+  DevFp dev_non_residue;
+  dev_non_residue.load(bn_env, non_residue, 0);
+
+  if(instance < half_n){
+  DevAltBn128G2 a;
+  a.load(bn_env, data, instance);
+  for(int i = instance + half_n; i < n; i+= half_n){
+    DevAltBn128G2 b;
+    b.load(bn_env, data, i);
+    dev_alt_bn128_g2_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv, dev_non_residue);
+  }
+  //a.store(bn_env, out, instance);
+  a.store(bn_env, cache_data, local_instance * 48);
+  }
+  __syncthreads();
+  int len = BlockInstances/2; 
+  while(len >= 1){
+    if(local_instance < len && instance < half_n){
+        DevAltBn128G2 a, b;
+        a.load(bn_env, cache_data, local_instance);
+        b.load(bn_env, cache_data, local_instance + len);
+        dev_alt_bn128_g2_add(bn_env, a, b, &a, res, buffer, local_max_value, local_modulus, inv, dev_non_residue);
+        if(len == 1){
+            a.store(bn_env, out, instance);
+        }else{
+            a.store(bn_env, cache_data, local_instance * 48);
+        }
+    }
+    len /= 2;
+    __syncthreads();
+  }
+}
+
 void alt_bn128_g2_reduce_sum2(
     alt_bn128_g2 data, 
     alt_bn128_g2 out, 
@@ -374,17 +433,17 @@ void alt_bn128_g2_reduce_sum2(
     }
   }
   if(false){
-  test_g2<32, 128><<<128, 256, 0, stream>>>(report, data, out, n-1, max_value, modulus, inv, non_residue);
-  //CUDA_CHECK(cudaDeviceSynchronize());
-  int tmp_n = 32*128; 
-  test_g2<32, 16><<<16, 256, 0, stream>>>(report, out, data, tmp_n, max_value, modulus, inv, non_residue);
-  //CUDA_CHECK(cudaDeviceSynchronize());
-  test_g2<16, 4><<<4, 128, 0, stream>>>(report, data, out, 32*16, max_value, modulus, inv, non_residue);
-  //CUDA_CHECK(cudaDeviceSynchronize());
-  test_g2<8, 1><<<1, 64, 0, stream>>>(report, out, data, 64, max_value, modulus, inv, non_residue);
-  //CUDA_CHECK(cudaDeviceSynchronize());
-  test_g2<1, 1><<<1, 8, 0, stream>>>(report, data, out, 8, max_value, modulus, inv, non_residue);
-  //CUDA_CHECK(cudaDeviceSynchronize());
+      test_g2<32, 128><<<128, 256, 0, stream>>>(report, data, out, n-1, max_value, modulus, inv, non_residue);
+      //CUDA_CHECK(cudaDeviceSynchronize());
+      int tmp_n = 32*128; 
+      test_g2<32, 16><<<16, 256, 0, stream>>>(report, out, data, tmp_n, max_value, modulus, inv, non_residue);
+      //CUDA_CHECK(cudaDeviceSynchronize());
+      test_g2<16, 4><<<4, 128, 0, stream>>>(report, data, out, 32*16, max_value, modulus, inv, non_residue);
+      //CUDA_CHECK(cudaDeviceSynchronize());
+      test_g2<8, 1><<<1, 64, 0, stream>>>(report, out, data, 64, max_value, modulus, inv, non_residue);
+      //CUDA_CHECK(cudaDeviceSynchronize());
+      test_g2<1, 1><<<1, 8, 0, stream>>>(report, data, out, 8, max_value, modulus, inv, non_residue);
+      //CUDA_CHECK(cudaDeviceSynchronize());
   }
 }
 }//namespace gpu

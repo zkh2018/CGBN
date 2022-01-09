@@ -173,6 +173,7 @@ __global__ void kernel_get_bid_and_counter_g2(
   }
 }
 __global__ void kernel_split_to_bucket(
+        cgbn_error_report_t* report, 
 		alt_bn128_g2 data,
 		alt_bn128_g2 out,
 		const int data_length,
@@ -181,21 +182,27 @@ __global__ void kernel_split_to_bucket(
 		const int* value_ids,
 		const int* bucket_ids){
 	int tid = threadIdx.x + blockIdx.x * blockDim.x;
-	if(tid >= data_length) return;
-	int bucket_id = bucket_ids[tid];
+    int instance = tid / TPI;
+	if(instance >= data_length) return;
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+	int bucket_id = bucket_ids[instance];
 	if(bucket_id > 0 && bucket_id < bucket_num){
-		int src_i = value_ids[tid];
-		int dst_i = tid;//starts[bucket_id] + bucket_index[tid];
-#pragma unroll
-		for(int j = 0; j < 4; j++){
-      ((uint64_t*)out.x.c0.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.x.c0.mont_repr_data[src_i]._limbs)[j];
-      ((uint64_t*)out.y.c0.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.y.c0.mont_repr_data[src_i]._limbs)[j];
-      ((uint64_t*)out.z.c0.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.z.c0.mont_repr_data[src_i]._limbs)[j];
+		int src_i = value_ids[instance];
+		int dst_i = instance;//starts[bucket_id] + bucket_index[tid];
+        DevAltBn128G2 a;
+        a.load(bn_env, data, src_i);
+        a.store(bn_env, out, dst_i);
+//#pragma unroll
+		//for(int j = 0; j < 4; j++){
+        //    ((uint64_t*)out.x.c0.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.x.c0.mont_repr_data[src_i]._limbs)[j];
+        //    ((uint64_t*)out.y.c0.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.y.c0.mont_repr_data[src_i]._limbs)[j];
+        //    ((uint64_t*)out.z.c0.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.z.c0.mont_repr_data[src_i]._limbs)[j];
 
-      ((uint64_t*)out.x.c1.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.x.c1.mont_repr_data[src_i]._limbs)[j];
-      ((uint64_t*)out.y.c1.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.y.c1.mont_repr_data[src_i]._limbs)[j];
-      ((uint64_t*)out.z.c1.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.z.c1.mont_repr_data[src_i]._limbs)[j];
-		}
+        //    ((uint64_t*)out.x.c1.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.x.c1.mont_repr_data[src_i]._limbs)[j];
+        //    ((uint64_t*)out.y.c1.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.y.c1.mont_repr_data[src_i]._limbs)[j];
+        //    ((uint64_t*)out.z.c1.mont_repr_data[dst_i]._limbs)[j] = ((uint64_t*)data.z.c1.mont_repr_data[src_i]._limbs)[j];
+		//}
 
 	}
 }
@@ -223,7 +230,10 @@ void split_to_bucket_g2(
 	  thrust::sort_by_key(thrust::cuda::par.on(stream), bucket_ids, bucket_ids + data_length, value_ids); 
 	  //CUDA_CHECK(cudaDeviceSynchronize());
       
-	  kernel_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
+	  //kernel_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
+      cgbn_error_report_t *report = get_error_report();
+      blocks = (data_length + 63) / 64;
+      kernel_split_to_bucket<<<blocks, threads, 0, stream>>>(report, data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
 	  //cudaFree(bucket_ids);
 	  //cudaFree(value_ids);
   }
@@ -870,28 +880,40 @@ void multi_exp_g2(alt_bn128_g2 data, alt_bn128_g2 buckets,
 }
 
 
-__global__ void kernel_reverse_g2(alt_bn128_g2 data, alt_bn128_g2 out, int n, int offset){
+__global__ void kernel_reverse_g2(
+        cgbn_error_report_t* report, 
+        alt_bn128_g2 data, alt_bn128_g2 out, int n, int offset){
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  for(int i = tid; i < n; i += gridDim.x * blockDim.x){
+  int instance = tid / TPI;
+  int local_instances = blockDim.x / TPI;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  for(int i = instance; i < n; i += gridDim.x * local_instances){
     int in_i = i * offset;
     int out_i = n - i - 1;
+    DevAltBn128G2 a;
+    a.load(bn_env, data, in_i);
+    a.store(bn_env, out, out_i);
 //#pragma unroll
-    for(int j = 0; j < 4; j++){
-      ((uint64_t*)out.x.c0.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.x.c0.mont_repr_data[in_i]._limbs)[j];
-      ((uint64_t*)out.x.c1.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.x.c1.mont_repr_data[in_i]._limbs)[j];
-      ((uint64_t*)out.y.c0.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.y.c0.mont_repr_data[in_i]._limbs)[j];
-      ((uint64_t*)out.y.c1.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.y.c1.mont_repr_data[in_i]._limbs)[j];
-      ((uint64_t*)out.z.c0.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.z.c0.mont_repr_data[in_i]._limbs)[j];
-      ((uint64_t*)out.z.c1.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.z.c1.mont_repr_data[in_i]._limbs)[j];
+    //for(int j = 0; j < 4; j++){
+    //  ((uint64_t*)out.x.c0.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.x.c0.mont_repr_data[in_i]._limbs)[j];
+    //  ((uint64_t*)out.x.c1.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.x.c1.mont_repr_data[in_i]._limbs)[j];
+    //  ((uint64_t*)out.y.c0.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.y.c0.mont_repr_data[in_i]._limbs)[j];
+    //  ((uint64_t*)out.y.c1.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.y.c1.mont_repr_data[in_i]._limbs)[j];
+    //  ((uint64_t*)out.z.c0.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.z.c0.mont_repr_data[in_i]._limbs)[j];
+    //  ((uint64_t*)out.z.c1.mont_repr_data[out_i]._limbs)[j] = ((uint64_t*)data.z.c1.mont_repr_data[in_i]._limbs)[j];
 
-    }
+    //}
   }
 }
 
 void reverse_g2(alt_bn128_g2 in, alt_bn128_g2 out, const int n, const int offset, CudaStream stream){
   const int threads = 512;
-  int reverse_blocks = (n + threads - 1) / threads;
-  kernel_reverse_g2<<<reverse_blocks, threads, 0, stream>>>(in, out, n, offset);
+  //int reverse_blocks = (n + threads - 1) / threads;
+  //kernel_reverse_g2<<<reverse_blocks, threads, 0, stream>>>(in, out, n, offset);
+  cgbn_error_report_t *report = get_error_report();
+  int reverse_blocks = (n + 63) / 64;
+  kernel_reverse_g2<<<reverse_blocks, threads, 0, stream>>>(report, in, out, n, offset);
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
 

@@ -146,6 +146,37 @@ struct DevAltBn128G2{
     cgbn_store(bn_env, a.z.c1.mont_repr_data + offset, z.c1.mont);
   }
 
+  inline __device__ void load(env_t& bn_env, uint32_t* data, const int offset){
+    cgbn_load(bn_env, x.c0.mont, data + offset);
+    cgbn_load(bn_env, x.c1.mont, data + offset + 8);
+    cgbn_load(bn_env, y.c0.mont, data + offset + 16);
+    cgbn_load(bn_env, y.c1.mont, data + offset + 24);
+    cgbn_load(bn_env, z.c0.mont, data + offset + 32);
+    cgbn_load(bn_env, z.c1.mont, data + offset + 40);
+    //const int group_id = threadIdx.x & (TPI-1);
+    //x.c0.mont._limbs[0] = data[offset + group_id];
+    //x.c1.mont._limbs[0] = data[offset + 8 + group_id];
+    //y.c0.mont._limbs[0] = data[offset + 16 + group_id];
+    //y.c1.mont._limbs[0] = data[offset + 24 + group_id];
+    //z.c0.mont._limbs[0] = data[offset + 32 + group_id];
+    //z.c1.mont._limbs[0] = data[offset + 40 + group_id];
+  }
+  inline __device__ void store(env_t& bn_env, uint32_t* data, const int offset){
+    cgbn_store(bn_env, data + offset    , x.c0.mont);   
+    cgbn_store(bn_env, data + offset + 8 , x.c1.mont);
+    cgbn_store(bn_env, data + offset + 16, y.c0.mont);
+    cgbn_store(bn_env, data + offset + 24, y.c1.mont);
+    cgbn_store(bn_env, data + offset + 32, z.c0.mont);
+    cgbn_store(bn_env, data + offset + 40, z.c1.mont);
+    //const int group_id = threadIdx.x & (TPI-1);
+    //data[offset + group_id] = x.c0.mont._limbs[0];
+    //data[offset + 8 + group_id] = x.c1.mont._limbs[0];
+    //data[offset + 16 + group_id] = y.c0.mont._limbs[0];
+    //data[offset + 24 + group_id] = y.c1.mont._limbs[0];
+    //data[offset + 32 + group_id] = z.c0.mont._limbs[0];
+    //data[offset + 40 + group_id] = z.c1.mont._limbs[0];
+  }
+
   inline __device__ void dbl(env_t& bn_env, DevAltBn128G2* dev_c, uint32_t* res, uint32_t* buffer, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus, const uint64_t inv, const DevFp& non_residue) const {
     if(is_zero(bn_env)){
       //store(bn_env, c, instance);
