@@ -24,6 +24,11 @@ struct DevFp{
     cgbn_set_ui32(bn_env, mont,value);
   }
 
+  inline __device__ void set(env_t& bn_env, const DevFp& other){
+    //inv = other.inv;
+    cgbn_set(bn_env, mont, other.mont);
+    //cgbn_set(bn_env, modulus, other.modulus);
+  }
   inline __device__ void copy_from(env_t& bn_env, const DevFp& other){
     //inv = other.inv;
     cgbn_set(bn_env, mont, other.mont);
@@ -42,6 +47,7 @@ struct DevFp{
     cgbn_load(bn_env, ret.mont, res + 8);
     return ret;
   }
+
   inline __device__ DevFp mul(env_t& bn_env, const DevFp& other, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
     device_mul_reduce(bn_env, res, mont, other.mont, modulus, tmp_buffer, inv);
     DevFp ret;
@@ -49,6 +55,7 @@ struct DevFp{
     return ret;
 
   }
+
   inline __device__ DevFp sub(env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
     DevFp ret;
     device_fp_sub(bn_env, ret.mont, mont, other.mont, modulus, max_value);

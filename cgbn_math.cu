@@ -3,9 +3,9 @@
 #include <cuda.h>
 
 #include "cgbn/cgbn.h"
-#include "utility/cpu_support.h"
-#include "utility/cpu_simple_bn_math.h"
-#include "utility/gpu_support.h"
+//#include "utility/cpu_support.h"
+//#include "utility/cpu_simple_bn_math.h"
+#include "gpu_support.h"
 
 #define TPI 8
 typedef cgbn_context_t<TPI> context_t;
