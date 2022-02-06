@@ -32,6 +32,14 @@ __device__ __forceinline__ uint32_t core_t<env>::get_ui32(const uint32_t a[LIMBS
 }
 
 template<class env> 
+__device__ __forceinline__ void core_t<env>::get_ui64(const uint32_t a[LIMBS], uint32_t *ret) {
+  uint32_t sync=sync_mask();
+  
+  ret[0] = __shfl_sync(sync, a[0], 0, TPI);
+  ret[1] = __shfl_sync(sync, a[0], 1, TPI);
+}
+
+template<class env> 
 __device__ __forceinline__ void core_t<env>::set_ui32(uint32_t r[LIMBS], const uint32_t value) {
   uint32_t group_thread=threadIdx.x & TPI-1;
 
@@ -44,8 +52,15 @@ template<class env>
 __device__ __forceinline__ void core_t<env>::set_ui32(uint32_t r[LIMBS], const uint32_t value, const uint32_t value2) {
   uint32_t group_thread=threadIdx.x & TPI-1;
 
-  r[0]=(group_thread==0) ? value : 0;
-  r[0]=(group_thread==1) ? value2 : 0;
+  //r[0]=(group_thread==0) ? value : 0;
+  //r[0]=(group_thread==1) ? value2 : 0;
+  if(group_thread == 0){
+    r[0] = value;
+  }else if(group_thread == 1){
+    r[0] = value2;
+  }else{
+    r[0] = 0;
+  }
   #pragma unroll
   for(int32_t index=1;index<LIMBS;index++)
     r[index]=0;

@@ -178,6 +178,11 @@ __host__ __device__ __forceinline__ uint32_t cgbn_get_ui32(env_t env, const type
 }
 
 template<class env_t>
+__host__ __device__ __forceinline__ void cgbn_get_ui64(env_t env, const typename env_t::cgbn_t &a, uint32_t* ret) {
+  env.get_ui64(a, ret);
+}
+
+template<class env_t>
 __host__ __device__ __forceinline__ void cgbn_set_ui32(env_t env, typename env_t::cgbn_t &r, const uint32_t value) {
   env.set_ui32(r, value);
 }
