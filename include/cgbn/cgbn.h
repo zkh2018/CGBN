@@ -178,6 +178,11 @@ __host__ __device__ __forceinline__ uint32_t cgbn_get_ui32(env_t env, const type
 }
 
 template<class env_t>
+__host__ __device__ __forceinline__ uint32_t cgbn_get_ui32(env_t env, const typename env_t::cgbn_t &a, const int index) {
+  return env.get_ui32(a, index);
+}
+
+template<class env_t>
 __host__ __device__ __forceinline__ void cgbn_get_ui64(env_t env, const typename env_t::cgbn_t &a, uint32_t* ret) {
   env.get_ui64(a, ret);
 }
@@ -204,6 +209,26 @@ __host__ __device__ __forceinline__ int32_t cgbn_sub_ui32(env_t env, typename en
 template<class env_t>
 __host__ __device__ __forceinline__ uint32_t cgbn_mul_ui32(env_t env, typename env_t::cgbn_t &r, const typename env_t::cgbn_t &a, const uint32_t mul) {
   return env.mul_ui32(r, a, mul);
+}
+
+template<class env_t>
+__host__ __device__ __forceinline__ void cgbn_mul_ui64(env_t env, typename env_t::cgbn_wide_t &r, const typename env_t::cgbn_t &a, const uint64_t mul) {
+  uint32_t *b32 = (uint32_t*)&mul;
+  uint32_t tmp1 = cgbn_mul_ui32(env, r._low, a, b32[1]); 
+  uint32_t tmp2 = cgbn_mul_ui32(env, r._high, a, b32[0]); 
+  uint32_t carry = cgbn_get_ui32(env, r._high, 0);
+  cgbn_shift_right(env, r._high, r._high, 32);
+  uint32_t tmp3 = cgbn_add(env, r._low, r._low, r._high);
+  uint32_t right = cgbn_get_ui32(env, r._low, 7);
+  uint64_t tmp4 = (uint64_t)right + tmp2;
+  uint32_t tmp5 = (uint32_t)tmp4;
+  uint32_t tmp6 = 0;
+  if(tmp5 != tmp4){
+        tmp6 = 1;
+  }
+  cgbn_shift_left(env, r._low, r._low, 32); 
+  cgbn_set_ui32(env, r._high, tmp5, tmp1 + tmp6);
+  cgbn_add_ui32(env, r._low, r._low, carry);
 }
 
 template<class env_t>

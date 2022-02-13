@@ -358,20 +358,23 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
   for(int i = 0; i < n; i+=2){
     cgbn_load(bn_env, tres, res+i);
 
-    if(group_thread == 0){
-      uint64_t *p64 = (uint64_t*)(res+i);
-      uint64_t k = inv * p64[0];
-      uint32_t *p32 = (uint32_t*)&k;
-      //cgbn_set_ui32(bn_env, tb, p32[0], p32[1]);
-      tmp_buffer[0] = p32[0];
-      tmp_buffer[1] = p32[1];
-      for(int j = 2; j < BITS/32; j++){
-        tmp_buffer[j] = 0;
-      }
-    }
-    cgbn_load(bn_env, tb, tmp_buffer);
+    //if(group_thread == 0){
+    //  uint64_t *p64 = (uint64_t*)(res+i);
+    //  uint64_t k = inv * p64[0];
+    //  uint32_t *p32 = (uint32_t*)&k;
+    //  //cgbn_set_ui32(bn_env, tb, p32[0], p32[1]);
+    //  tmp_buffer[0] = p32[0];
+    //  tmp_buffer[1] = p32[1];
+    //  for(int j = 2; j < BITS/32; j++){
+    //    tmp_buffer[j] = 0;
+    //  }
+    //}
+    //cgbn_load(bn_env, tb, tmp_buffer);
 
-    cgbn_mul_wide(bn_env, tc, tmodule_data, tb);
+    //cgbn_mul_wide(bn_env, tc, tmodule_data, tb);
+    uint64_t *p64 = (uint64_t*)(res+i);
+    uint64_t k = inv * p64[0];
+    cgbn_mul_ui64(bn_env, tc, tmodule_data, k); 
 
     uint32_t carryout = cgbn_add(bn_env, add_res, tc._low, tres);
     cgbn_store(bn_env, res+i, add_res);   

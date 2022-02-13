@@ -32,6 +32,13 @@ __device__ __forceinline__ uint32_t core_t<env>::get_ui32(const uint32_t a[LIMBS
 }
 
 template<class env> 
+__device__ __forceinline__ uint32_t core_t<env>::get_ui32(const uint32_t a[LIMBS], const int index) {
+  uint32_t sync=sync_mask();
+  
+  return __shfl_sync(sync, a[0], index, TPI);
+}
+
+template<class env> 
 __device__ __forceinline__ void core_t<env>::get_ui64(const uint32_t a[LIMBS], uint32_t *ret) {
   uint32_t sync=sync_mask();
   

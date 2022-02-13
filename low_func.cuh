@@ -159,6 +159,7 @@ inline __device__ void dev_neg(env_t& bn_env, uint32_t* y, uint32_t* x, uint32_t
     dev_neg(bn_env, ly, lx, lp);
 }
 
+
 //buf: size = 2 * N_32 + 2
 //t : size = N_32 + 2 + N_32
 inline __device__ void dev_mcl_mul(env_t& bn_env, 
@@ -166,59 +167,60 @@ inline __device__ void dev_mcl_mul(env_t& bn_env,
         uint32_t* p, uint32_t *buf, uint32_t *t, const uint64_t rp){
     int group_id = threadIdx.x & (TPI-1);
     cgbn_store(bn_env, t, ly);
-    uint64_t* p64_y = (uint64_t*)t;
+    const uint64_t* p64_y = (uint64_t*)t;
     const uint64_t* p64_p = (const uint64_t*)p;
-    //const uint64_t* p64_t = (const uint64_t*)t;
     uint64_t* c = (uint64_t*)buf;
     c[group_id] = 0;
-    //if(group_id == 0){
-    //    c[9] = 0;
-    //}
 
     env_t::cgbn_t lc;
     env_t::cgbn_wide_t lwc, lwt;
-    env_t::cgbn_t lcache;
-    cgbn_set_ui32(bn_env, lcache, t[0], t[1]);
-    cgbn_mul_wide(bn_env, lwc, lx, lcache);
+    //env_t::cgbn_t lcache;
+    //cgbn_set_ui32(bn_env, lcache, t[0], t[1]);
+    //cgbn_mul_wide(bn_env, lwc, lx, lcache);
+    cgbn_mul_ui64(bn_env, lwc, lx, p64_y[0]);
     cgbn_store(bn_env, buf, lwc._low);
     uint64_t q = c[0] * rp;
-    cgbn_set_ui32(bn_env, lcache, ((uint32_t*)&q)[0], ((uint32_t*)&q)[1]);
-    cgbn_mul_wide(bn_env, lwt, lp, lcache);
-    //cgbn_store(bn_env, t, lwt._high);
-    int32_t carry = cgbn_add(bn_env, lc, lwc._low, lwt._low);
+    //cgbn_set_ui32(bn_env, lcache, ((uint32_t*)&q)[0], ((uint32_t*)&q)[1]);
+    //cgbn_mul_wide(bn_env, lwt2, lp, lcache);
+    uint32_t th[2];
+
+    cgbn_mul_ui64(bn_env, lwt, lp, q);
+    q = cgbn_add(bn_env, lc, lwc._low, lwt._low);
     cgbn_store(bn_env, buf, lc);
     cgbn_store(bn_env, buf + N_32, lwc._high);
-    uint32_t th[2];
     cgbn_get_ui64(bn_env, lwt._high, th);
     if(group_id == 0){
-        c[N_64] += *((uint64_t*)th) + carry; 
+        c[N_64] += *((uint64_t*)th) + q; 
+        c[N_64+1] = 0;
     }
     c++;
-    if(group_id == 0){
-        c[N_64] = 0;
-    }
+    //if(group_id == 0){
+    //    c[N_64] = 0;
+    //}
     for(int i = 1; i < N_64; i++){
         if(group_id == 0){
             c[N_64+1] = 0;
         }
         cgbn_load(bn_env, lc, (uint32_t*)c);
-        cgbn_set_ui32(bn_env, lcache, t[i * 2], t[i * 2 + 1]);
-        cgbn_mul_wide(bn_env, lwt, lx, lcache);
+        //cgbn_set_ui32(bn_env, lcache, t[i * 2], t[i * 2 + 1]);
+        //cgbn_mul_wide(bn_env, lwt, lx, lcache);
+        cgbn_mul_ui64(bn_env, lwt, lx, p64_y[i]);
         cgbn_get_ui64(bn_env, lwt._high, th);
-        carry = cgbn_add(bn_env, lc, lc, lwt._low);
+        q = cgbn_add(bn_env, lc, lc, lwt._low);
         cgbn_store(bn_env, (uint32_t*)c, lc);
         if(group_id == 0){
-            c[N_64] += *((uint64_t*)th) + carry; 
+            c[N_64] += *((uint64_t*)th) + q; 
         }
         q = c[0] * rp;
-        cgbn_set_ui32(bn_env, lcache, ((uint32_t*)&q)[0], ((uint32_t*)&q)[1]);
-        cgbn_mul_wide(bn_env, lwt, lp, lcache);
+        //cgbn_set_ui32(bn_env, lcache, ((uint32_t*)&q)[0], ((uint32_t*)&q)[1]);
+        //cgbn_mul_wide(bn_env, lwt, lp, lcache);
+        cgbn_mul_ui64(bn_env, lwt, lp, q);
         cgbn_get_ui64(bn_env, lwt._high, th);
-        cgbn_load(bn_env, lc, (uint32_t*)c);
-        carry = cgbn_add(bn_env, lc, lc, lwt._low);
+        //cgbn_load(bn_env, lc, (uint32_t*)c);
+        q = cgbn_add(bn_env, lc, lc, lwt._low);
         cgbn_store(bn_env, (uint32_t*)c, lc);
         if(group_id == 0){
-            c[N_64] += *((uint64_t*)th) + carry; 
+            c[N_64] += *((uint64_t*)th) + q; 
         }
         c++;
     }
