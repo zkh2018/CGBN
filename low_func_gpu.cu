@@ -33,5 +33,22 @@ void gpu_mcl_ect_add(mcl_bn128_g1 R, mcl_bn128_g1 P, mcl_bn128_g1 Q, Fp_model on
   kernel_ect_add<<<1, 8>>>(report, R, P, Q, one, p, a, specialA_, model_, rp);
 }
 
+void gpu_mcl_sub_g2(uint32_t* z, uint32_t *x, uint32_t *y, uint32_t *p){
+  cgbn_error_report_t *report = nullptr;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  kernel_mcl_sub_g2<<<1, 8>>>(report, z, x, y, p);
+}
+void gpu_mcl_add_g2(uint32_t* z, uint32_t *x, uint32_t *y, uint32_t *p){
+  cgbn_error_report_t *report = nullptr;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  kernel_mcl_add_g2<<<1, 8>>>(report, z, x, y, p);
+}
+
+void gpu_mont_red(uint32_t* z, uint32_t *xy, uint32_t *p, const uint64_t rp){
+  cgbn_error_report_t *report = nullptr;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  kernel_mont_red<<<1, 8>>>(report, z, xy, p, rp);
+}
+
 } // namespace gpu
 

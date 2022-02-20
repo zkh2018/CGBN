@@ -183,8 +183,8 @@ __host__ __device__ __forceinline__ uint32_t cgbn_get_ui32(env_t env, const type
 }
 
 template<class env_t>
-__host__ __device__ __forceinline__ void cgbn_get_ui64(env_t env, const typename env_t::cgbn_t &a, uint32_t* ret) {
-  env.get_ui64(a, ret);
+__host__ __device__ __forceinline__ void cgbn_get_ui64(env_t env, const typename env_t::cgbn_t &a, uint32_t* ret, const int index) {
+  env.get_ui64(a, ret, index);
 }
 
 template<class env_t>

@@ -256,8 +256,8 @@ __device__ __forceinline__ uint32_t cgbn_env_t<context_t, bits, syncable>::get_u
 }
 
 template<class context_t, uint32_t bits, cgbn_syncable_t syncable>
-__device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::get_ui64(const cgbn_t &a, uint32_t* res) const {
-  return cgbn::core_t<cgbn_env_t>::get_ui64(a._limbs, res);
+__device__ __forceinline__ void cgbn_env_t<context_t, bits, syncable>::get_ui64(const cgbn_t &a, uint32_t* res, const int index) const {
+  return cgbn::core_t<cgbn_env_t>::get_ui64(a._limbs, res, index);
 }
 
 template<class context_t, uint32_t bits, cgbn_syncable_t syncable>

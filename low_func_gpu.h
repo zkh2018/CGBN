@@ -98,6 +98,11 @@ void mcl_bn128_g1_reduce_sum2(
     const uint64_t rp,
     CudaStream stream);
 
+void gpu_mcl_sub_g2(uint32_t* z, uint32_t *x, uint32_t *y, uint32_t *p);
+void gpu_mcl_add_g2(uint32_t* z, uint32_t *x, uint32_t *y, uint32_t *p);
+void gpu_mont_red(uint32_t* z, uint32_t *xy, uint32_t *p, const uint64_t rp);
+
+
 } // namespace gpu
 
 #endif
