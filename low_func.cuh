@@ -1611,10 +1611,6 @@ __global__ void kernel_mcl_add_g2(
   cgbn_store(bn_env, z+8, lz.c1.mont);
 }
 
-struct DevFpDblT {
-    env_t::cgbn_wide_t v;
-};
-
 //buf[2*N_32+2]
 //pq[N_32 + 2]
 inline __device__ void dev_mont_red(env_t& bn_env, 
@@ -1652,18 +1648,19 @@ inline __device__ void dev_mont_red(env_t& bn_env,
             p64_buf[N_64] = *(uint64_t*)th + p64_pq[N_64];
         }
 
-        if(p64_buf[N_64] < *(uint64_t*)th){
+        if(p64_buf[N_64] < *(uint64_t*)th && p64_buf[N_64] < p64_pq[N_64]){
             env_t::cgbn_t la;
             cgbn_load(bn_env, la, buf + N_32 + 2);     
             cgbn_set_ui32(bn_env, la, 0, 7);
             cgbn_add_ui32(bn_env, la, la, 1); 
+            cgbn_store(bn_env, buf + N_32 + 2, la);
         }
         if(group_id == 0){
             p64_buf[N_64] += carry;
         }
 
         uint64_t *c = p64_buf + 1;
-        for(int i = 0; i < N_64; i++){
+        for(int i = 1; i < 0; i++){
             q = c[0] * rp;
             //pq = p*q
             cgbn_mul_ui64(bn_env, lwt, lp, q);
@@ -1685,17 +1682,18 @@ inline __device__ void dev_mont_red(env_t& bn_env,
             if(c[N_64] < p64_pq[N_64]){
                 env_t::cgbn_t la;
                 cgbn_set_ui32(bn_env, la, 0);
-                //if(group_id < N_32 - i*2)
-                    cgbn_load(bn_env, la, (uint32_t*)c + N_32 + 2);     
+                cgbn_load(bn_env, la, (uint32_t*)c + N_32 + 2);     
                 cgbn_add_ui32(bn_env, la, la, 1); 
                 if(group_id < N_32 - i*2)
-                    cgbn_store(bn_env, (uint32_t*)c, la);
+                    cgbn_store(bn_env, (uint32_t*)c + N_32 + 2, la);
             }
             if(group_id == 0){
                 c[N_64] += carry;
             }
             c++;
         }
+        //cgbn_load(bn_env, lc, buf + 2);
+        //cgbn_set(bn_env, lz, lc);
         cgbn_load(bn_env, lc, (uint32_t*)c);
         carry = cgbn_sub(bn_env, lz, lc, lp);
         if(carry){
@@ -1712,10 +1710,119 @@ __global__ void kernel_mont_red(
   env_t::cgbn_wide_t lxy;
   cgbn_load(bn_env, lp, p);
   cgbn_load(bn_env, lxy._low, xy);
-  cgbn_load(bn_env, lxy._high, xy + 32);
+  cgbn_load(bn_env, lxy._high, xy + 8);
   dev_mont_red(bn_env, lz, lxy, lp, p, cache_buf, cache_pq, rp);
   cgbn_store(bn_env, z, lz);
 }
+
+__global__ void kernel_mul_wide(
+    cgbn_error_report_t* report, 
+    uint32_t* z, uint32_t* x, uint32_t* y){
+  context_t bn_context(cgbn_report_monitor, report, 0);
+  env_t          bn_env(bn_context.env<env_t>());  
+  env_t::cgbn_wide_t lz;
+  env_t::cgbn_t lx, ly;
+  cgbn_load(bn_env, lx, x);
+  cgbn_load(bn_env, ly, y);
+  cgbn_mul_wide(bn_env, lz, lx, ly);
+  cgbn_store(bn_env, z, lz._low);
+  cgbn_store(bn_env, z + 8, lz._high);
+}
+
+inline __device__ uint32_t dev_sub_wide(env_t& bn_env, env_t::cgbn_wide_t& lz, env_t::cgbn_wide_t& lx, env_t::cgbn_wide_t& ly){
+  if(cgbn_compare(bn_env, lx._low, ly._low) >= 0){
+    cgbn_sub(bn_env, lz._low, lx._low, ly._low);
+    return cgbn_sub(bn_env, lz._high, lx._high, ly._high);
+  }else{
+    env_t::cgbn_t max;
+    env_t::cgbn_wide_t tmpz;
+    cgbn_set(bn_env, max, 0xffffffff);
+    cgbn_sub(bn_env, tmpz._low, max, ly._low);
+    cgbn_add(bn_env, tmpz._low, tmpz._low, lx._low);
+    cgbn_add_ui32(bn_env, lz._low, tmpz._low, 1);
+    cgbn_sub_ui32(bn_env, tmpz._high, lx._high, 1);
+    return cgbn_sub(bn_env, lz._high, tmpz._high, ly._high);
+  }
+}
+__global__ void kernel_sub_wide(
+    cgbn_error_report_t* report, 
+    uint32_t* z, uint32_t* x, uint32_t* y){
+  context_t bn_context(cgbn_report_monitor, report, 0);
+  env_t          bn_env(bn_context.env<env_t>());  
+  env_t::cgbn_wide_t lz, lx, ly;
+  cgbn_load(bn_env, lx._low, x);
+  cgbn_load(bn_env, lx._high, x + 8);
+  cgbn_load(bn_env, ly._low, y);
+  cgbn_load(bn_env, ly._high, y + 8);
+  dev_sub_wide(bn_env, lz, lx, ly);
+  cgbn_store(bn_env, z, lz._low);
+  cgbn_store(bn_env, z + 8, lz._high);
+}
+
+
+struct Fp2Dbl{
+    env_t::cgbn_wide_t a,b;
+};
+
+inline __device__ void dev_fp2Dbl_mulPreW(
+    env_t& bn_env,
+    Fp2Dbl& z,
+    MclFp2& x, MclFp2& y,
+    env_t::cgbn_t& lp){
+
+    // const Fp& a = x.a;
+    // const Fp& b = x.b;
+    // const Fp& c = y.a;
+    // const Fp& d = y.b;
+    //FpDbl& d1 = z.b;
+    DevFp s, t;
+    // Fp::addPre(s, a, b);
+    cgbn_add(bn_env, s.mont, x.c0.mont, x.c1.mont);  
+    //Fp::addPre(t, c, d);
+    cgbn_add(bn_env, t.mont, y.c0.mont, y.c1.mont);  
+    //FpDbl::mulPre(d1, s, t);
+    cgbn_mul_wide(bn_env, z.b, s.mont, t.mont); 
+
+    //FpDbl::mulPre(d0, a, c);
+    cgbn_mul_wide(bn_env, z.a, x.c0.mont, y.c0.mont); 
+    //FpDbl::mulPre(d2, b, d);
+    env_t::cgbn_wide_t d2;
+    cgbn_mul_wide(bn_env, d2, x.c1.mont, y.c1.mont); 
+
+    // FpDbl::subPre(d1, d1, d0);
+    dev_sub_wide(bn_env, z.b, z.b, z.a);
+
+    //FpDbl::subPre(d1, d1, d2);
+    dev_sub_wide(bn_env, z.b, z.b, d2);
+
+    //FpDbl::sub(d0, d0, d2);
+    if(dev_sub_wide(bn_env, z.a, z.a, d2)){
+        cgbn_add(bn_env, z.a._high, z.a._high, lp);
+    }
+}
+
+__global__ void kernel_fp2Dbl_mulPreW(
+    cgbn_error_report_t* report, 
+    uint32_t* z, uint32_t* x, uint32_t* y,
+    uint32_t *p
+){
+  context_t bn_context(cgbn_report_monitor, report, 0);
+  env_t          bn_env(bn_context.env<env_t>());  
+  Fp2Dbl lz;
+  MclFp2 lx, ly;
+  cgbn_load(bn_env, lx.c0.mont, x);
+  cgbn_load(bn_env, lx.c1.mont, x + 8);
+  cgbn_load(bn_env, ly.c0.mont, y);
+  cgbn_load(bn_env, ly.c1.mont, y + 8);
+  env_t::cgbn_t lp;
+  cgbn_load(bn_env, lp, p);
+  dev_fp2Dbl_mulPreW(bn_env, lz, lx, ly, lp);
+  cgbn_store(bn_env, z, lz.a._low);
+  cgbn_store(bn_env, z + 8, lz.a._high);
+  cgbn_store(bn_env, z + 16, lz.b._low);
+  cgbn_store(bn_env, z + 24, lz.b._high);
+}
+
 
 }// namespace gpu
 

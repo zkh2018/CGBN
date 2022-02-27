@@ -50,5 +50,22 @@ void gpu_mont_red(uint32_t* z, uint32_t *xy, uint32_t *p, const uint64_t rp){
   kernel_mont_red<<<1, 8>>>(report, z, xy, p, rp);
 }
 
+void gpu_mul_wide(uint32_t*z, uint32_t*x, uint32_t*y){
+  cgbn_error_report_t *report = nullptr;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  kernel_mul_wide<<<1, 8>>>(report, z, x, y);
+}
+
+void gpu_sub_wide(uint32_t*z, uint32_t*x, uint32_t*y){
+  cgbn_error_report_t *report = nullptr;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  kernel_sub_wide<<<1, 8>>>(report, z, x, y);
+}
+void gpu_fp2Dbl_mulPreW(uint32_t*z, uint32_t*x, uint32_t*y, uint32_t*p){
+  cgbn_error_report_t *report = nullptr;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  kernel_fp2Dbl_mulPreW<<<1, 8>>>(report, z, x, y, p);
+}
+
 } // namespace gpu
 

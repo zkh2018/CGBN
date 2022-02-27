@@ -149,6 +149,7 @@ class cgbn_env_t {
 
   /* bn arithmetic routines */
   __device__ __forceinline__ void       set(cgbn_t &r, const cgbn_t &a) const;
+  __device__ __forceinline__ void       set(cgbn_t &r, const uint32_t value) const;
   __device__ __forceinline__ int32_t    add(cgbn_t &r, const cgbn_t &a, const cgbn_t &b) const;
   __device__ __forceinline__ int32_t    sub(cgbn_t &r, const cgbn_t &a, const cgbn_t &b) const;
   __device__ __forceinline__ int32_t    negate(cgbn_t &r, const cgbn_t &a) const;

@@ -39,6 +39,13 @@ __device__ __forceinline__ void mpset(uint32_t r[limbs], const uint32_t a[limbs]
 }
 
 template<uint32_t limbs>
+__device__ __forceinline__ void mpset(uint32_t r[limbs], const uint32_t a) {
+  #pragma unroll
+  for(int32_t index=0;index<limbs;index++)
+    r[index]=a;
+}
+
+template<uint32_t limbs>
 __device__ __forceinline__ void mpswap(uint32_t x[limbs], uint32_t y[limbs]) {
   #pragma unroll
   for(int32_t index=0;index<limbs;index++) {
