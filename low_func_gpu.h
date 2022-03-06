@@ -106,6 +106,7 @@ void gpu_sub_wide(uint32_t*z, uint32_t*x, uint32_t*y);
 void gpu_fp2Dbl_mulPreW(uint32_t*z, uint32_t*x, uint32_t*y, uint32_t*p);
 void gpu_sqr_g2(uint32_t*y, uint32_t*x, uint32_t*p, const uint64_t rp);
 void gpu_mcl_mul_g2(uint32_t* z, uint32_t*x, uint32_t*y, uint32_t*p, const uint64_t rp);
+void gpu_mcl_ect_add_g2(mcl_bn128_g2 R, mcl_bn128_g2 P, mcl_bn128_g2 Q, Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int model_, const uint64_t rp);
 
 } // namespace gpu
 

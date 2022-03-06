@@ -1550,23 +1550,18 @@ void mcl_bn128_g1_reduce_sum2(
 //mcl_bn128_g2
 struct MclFp2: public DevFp2 {
     uint32_t *ptr;
-};
-
-struct DevEct2 : public DevAltBn128G2 {
-
 inline __device__ bool is_zero(env_t& bn_env){
-    return false;
-}
-    
-inline __device__ void set(env_t& bn_env, DevEct& other){
+    return (dev_is_zero(bn_env, this->c0.mont) && dev_is_zero(bn_env, this->c1.mont));
 }
 
-inline __device__ void clear(env_t& bn_env){
+inline __device__ bool is_one(env_t& bn_env, env_t::cgbn_t& one){
+    return (dev_is_one(bn_env, this->c0.mont, one) && dev_is_one(bn_env, this->c1.mont, one));
 }
 
 };
 
-inline __device__ void g2_sub(env_t& bn_env, MclFp2& z, MclFp2& x, MclFp2& y, env_t::cgbn_t& lp){
+
+inline __device__ void dev_mcl_sub_g2(env_t& bn_env, MclFp2& z, MclFp2& x, MclFp2& y, env_t::cgbn_t& lp){
     dev_mcl_sub(bn_env, z.c0.mont, x.c0.mont, y.c0.mont, lp);
     dev_mcl_sub(bn_env, z.c1.mont, x.c1.mont, y.c1.mont, lp);
 }
@@ -1583,12 +1578,12 @@ __global__ void kernel_mcl_sub_g2(
   cgbn_load(bn_env, lx.c1.mont, x + 8);
   cgbn_load(bn_env, ly.c0.mont, y);
   cgbn_load(bn_env, ly.c1.mont, y + 8);
-  g2_sub(bn_env, lz, lx, ly, lp);
+  dev_mcl_sub_g2(bn_env, lz, lx, ly, lp);
   cgbn_store(bn_env, z, lz.c0.mont);
   cgbn_store(bn_env, z+8, lz.c1.mont);
 }
 
-inline __device__ void g2_add(env_t& bn_env, MclFp2& z, MclFp2& x, MclFp2& y, env_t::cgbn_t& lp, uint32_t* p, uint32_t* cache){
+inline __device__ void dev_mcl_add_g2(env_t& bn_env, MclFp2& z, MclFp2& x, MclFp2& y, env_t::cgbn_t& lp, uint32_t* p, uint32_t* cache){
     dev_mcl_add(bn_env, z.c0.mont, x.c0.mont, y.c0.mont, lp, p, cache);
     dev_mcl_add(bn_env, z.c1.mont, x.c1.mont, y.c1.mont, lp, p, cache);
 }
@@ -1606,7 +1601,7 @@ __global__ void kernel_mcl_add_g2(
   cgbn_load(bn_env, lx.c1.mont, x + 8);
   cgbn_load(bn_env, ly.c0.mont, y);
   cgbn_load(bn_env, ly.c1.mont, y + 8);
-  g2_add(bn_env, lz, lx, ly, lp, p, cache);
+  dev_mcl_add_g2(bn_env, lz, lx, ly, lp, p, cache);
   cgbn_store(bn_env, z, lz.c0.mont);
   cgbn_store(bn_env, z+8, lz.c1.mont);
 }
@@ -1812,7 +1807,7 @@ __global__ void kernel_fp2Dbl_mulPreW(
   cgbn_store(bn_env, z + 24, lz.b._high);
 }
 
-inline __device__ void dev_sqr_g2(
+inline __device__ void dev_mcl_sqr_g2(
         env_t& bn_env, 
         MclFp2& y, MclFp2& x,
         env_t::cgbn_t& lp,
@@ -1850,7 +1845,7 @@ __global__ void kernel_sqr_g2(
   cgbn_load(bn_env, lp, p);
 
   __shared__ uint32_t cache_buf[N_32*2+2], cache_t[N_32];
-  dev_sqr_g2(bn_env, ly, lx, lp, p, cache_buf, cache_t, rp);
+  dev_mcl_sqr_g2(bn_env, ly, lx, lp, p, cache_buf, cache_t, rp);
   cgbn_store(bn_env, y, ly.c0.mont);
   cgbn_store(bn_env, y + 8, ly.c1.mont);
 }
@@ -1880,6 +1875,312 @@ __global__ void kernel_mcl_mul_g2(
   dev_mcl_mul_g2(bn_env, lz, lx, ly, lp, p, cache_buf, cache_pq, rp);
   cgbn_store(bn_env, z, lz.c0.mont);
   cgbn_store(bn_env, z + 8, lz.c1.mont);
+}
+
+struct DevEct2 {
+    MclFp2 x, y, z;
+
+    inline __device__ bool is_zero(env_t& bn_env){
+        return z.is_zero(bn_env);
+    }
+    
+    inline __device__ void set(env_t& bn_env, DevEct2& other){
+        this->x.copy_from(bn_env, other.x);
+        this->y.copy_from(bn_env, other.y);
+        this->z.copy_from(bn_env, other.z);
+    }
+
+    inline __device__ void clear(env_t& bn_env){
+        x.set_zero(bn_env);
+        y.set_zero(bn_env);
+        z.set_zero(bn_env);
+    }
+
+    inline __device__ void dev_dblNoVerifyInfJacobi(env_t& bn_env, DevEct2& P, MclFp& one, MclFp& p, const int specialA_, uint32_t* cache_buf, uint32_t *cache_t, MclFp2& a_, const uint64_t rp){
+        MclFp2 S, M, t, y2;
+        //Fp::sqr(y2, P.y);
+        dev_mcl_sqr_g2(bn_env, y2, P.y, p.mont, p.ptr, cache_buf, cache_t, rp); 
+        //Fp::mul(S, P.x, y2);
+        dev_mcl_mul_g2(bn_env, S, P.x, y2, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //const bool isPzOne = P.z.isOne();
+        const bool isPzOne = P.z.is_zero(bn_env);//dev_is_one(bn_env, P.z.mont, one.mont);
+        //S += S;
+        dev_mcl_add_g2(bn_env, S, S, S, p.mont, p.ptr, cache_buf);
+        //S += S;
+        dev_mcl_add_g2(bn_env, S, S, S, p.mont, p.ptr, cache_buf);
+        //Fp::sqr(M, P.x);
+        dev_mcl_sqr_g2(bn_env, M, P.x, p.mont, p.ptr, cache_buf, cache_t, rp); 
+        switch (specialA_) {
+            case 0:
+                //Fp::add(t, M, M);
+                dev_mcl_add_g2(bn_env, t, M, M, p.mont, p.ptr, cache_buf);
+                //M += t;
+                dev_mcl_add_g2(bn_env, M, M, t, p.mont, p.ptr, cache_buf);
+                break;
+            case 1:
+                if (isPzOne) {
+                    //M -= P.z;
+                    dev_mcl_sub_g2(bn_env, M, M, P.z, p.mont);
+                } else {
+                    //Fp::sqr(t, P.z);
+                    dev_mcl_sqr_g2(bn_env, t, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+                    //Fp::sqr(t, t);
+                    dev_mcl_sqr_g2(bn_env, t, t, p.mont, p.ptr, cache_buf, cache_t, rp);
+                    //M -= t;
+                    dev_mcl_sub_g2(bn_env, M, M, t, p.mont);
+                }
+                //Fp::add(t, M, M);
+                dev_mcl_add_g2(bn_env, t, M, M, p.mont, p.ptr, cache_buf);
+                //M += t;
+                dev_mcl_add_g2(bn_env, M, M, t, p.mont, p.ptr, cache_buf);
+                break;
+            case 2:
+            default:
+                if (isPzOne) {
+                    //t = a_;
+                    //cgbn_set(bn_env, t.mont, a_.mont);
+                    t.copy_from(bn_env, a_);
+                } else {
+                    //Fp::sqr(t, P.z);
+                    dev_mcl_sqr_g2(bn_env, t, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+                    //Fp::sqr(t, t);
+                    dev_mcl_sqr_g2(bn_env, t, t, p.mont, p.ptr, cache_buf, cache_t, rp);
+                    //t *= a_;
+                    dev_mcl_mul_g2(bn_env, t, t, a_, p.mont, p.ptr, cache_buf, cache_t, rp);
+                }
+                //t += M;
+                dev_mcl_add_g2(bn_env, t, t, M, p.mont, p.ptr, cache_buf);
+                //M += M;
+                dev_mcl_add_g2(bn_env, M, M, M, p.mont, p.ptr, cache_buf);
+                //M += t;
+                dev_mcl_add_g2(bn_env, M, M, t, p.mont, p.ptr, cache_buf);
+                break;
+        }
+        //Fp::sqr(R.x, M);
+        dev_mcl_sqr_g2(bn_env, this->x, M, p.mont, p.ptr, cache_buf, cache_t, rp); 
+        //R.x -= S;
+        dev_mcl_sub_g2(bn_env, this->x, this->x, S, p.mont);
+        //R.x -= S;
+        dev_mcl_sub_g2(bn_env, this->x, this->x, S, p.mont);
+        if (isPzOne) {
+            //R.z = P.y;
+            //cgbn_set(bn_env, this->z.mont, P.y.mont);
+            this->z.copy_from(bn_env, P.y);
+        } else {
+            //Fp::mul(R.z, P.y, P.z);
+            dev_mcl_mul_g2(bn_env, this->z, P.y, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+        }
+        //R.z += R.z;
+        dev_mcl_add_g2(bn_env, this->z, this->z, this->z, p.mont, p.ptr, cache_buf);
+        //Fp::sqr(y2, y2);
+        dev_mcl_sqr_g2(bn_env, y2, y2, p.mont, p.ptr, cache_buf, cache_t, rp); 
+        //y2 += y2;
+        dev_mcl_add_g2(bn_env, y2, y2, y2, p.mont, p.ptr, cache_buf);
+        //y2 += y2;
+        dev_mcl_add_g2(bn_env, y2, y2, y2, p.mont, p.ptr, cache_buf);
+        //y2 += y2;
+        dev_mcl_add_g2(bn_env, y2, y2, y2, p.mont, p.ptr, cache_buf);
+        //Fp::sub(R.y, S, R.x);
+        dev_mcl_sub_g2(bn_env, this->y, S, this->x, p.mont);
+        //R.y *= M;
+        dev_mcl_mul_g2(bn_env, this->y, this->y, M, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //R.y -= y2;
+        dev_mcl_sub_g2(bn_env, this->y, this->y, y2, p.mont);
+    }
+
+};
+
+inline __device__ void dev_addJacobi_g2(env_t& bn_env, DevEct2& R, DevEct2& P, DevEct2& Q, bool isPzOne, bool isQzOne,
+        MclFp& one, MclFp& p, const int specialA_, uint32_t* cache_buf, uint32_t* cache_t, MclFp2& a_, const int mode_, const uint64_t rp){
+    MclFp2 r, U1, S1, H, H3;
+    if (isPzOne) {
+        // r = 1;
+    } else {
+        //Fp::sqr(r, P.z);
+        dev_mcl_sqr_g2(bn_env, r, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+    }
+    if (isQzOne) {
+        //U1 = P.x;
+        //U1.set(bn_env, P.x);
+        U1.copy_from(bn_env, P.x);
+        if (isPzOne) {
+            //H = Q.x;
+            //H.set(bn_env, Q.x);
+            H.copy_from(bn_env, Q.x);
+        } else {
+            //Fp::mul(H, Q.x, r);
+            dev_mcl_mul_g2(bn_env, H, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
+        }
+        //H -= U1;
+        dev_mcl_sub_g2(bn_env, H, H, U1, p.mont);
+        //S1 = P.y;
+        //S1.set(bn_env, P.y);
+        S1.copy_from(bn_env, P.y);
+    } else {
+        //Fp::sqr(S1, Q.z);
+        dev_mcl_sqr_g2(bn_env, S1, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //Fp::mul(U1, P.x, S1);
+        dev_mcl_mul_g2(bn_env, U1, P.x, S1, p.mont, p.ptr, cache_buf, cache_t, rp);
+        if (isPzOne) {
+            //H = Q.x;
+            //H.set(bn_env, Q.x);
+            H.copy_from(bn_env, Q.x);
+        } else {
+            //Fp::mul(H, Q.x, r);
+            dev_mcl_mul_g2(bn_env, H, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
+        }
+        //H -= U1;
+        dev_mcl_sub_g2(bn_env, H, H, U1, p.mont);
+        //S1 *= Q.z;
+        dev_mcl_mul_g2(bn_env, S1, S1, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //S1 *= P.y;
+        dev_mcl_mul_g2(bn_env, S1, S1, P.y, p.mont, p.ptr, cache_buf, cache_t, rp);
+    }
+    if (isPzOne) {
+        //r = Q.y;
+        //r.set(bn_env, Q.y);
+        r.copy_from(bn_env, Q.y);
+    } else {
+        //r *= P.z;
+        dev_mcl_mul_g2(bn_env, r, r, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //r *= Q.y;
+        dev_mcl_mul_g2(bn_env, r, r, Q.y, p.mont, p.ptr, cache_buf, cache_t, rp);
+    }
+    //r -= S1;
+    dev_mcl_sub_g2(bn_env, r, r, S1, p.mont);
+    if (H.is_zero(bn_env)) {
+        if (r.is_zero(bn_env)) {
+            R.dev_dblNoVerifyInfJacobi(bn_env, P, one, p, specialA_, cache_buf, cache_t, a_, rp);
+        } else {
+            R.clear(bn_env);
+        }
+        return;
+    }
+    if (isPzOne) {
+        if (isQzOne) {
+            //R.z = H;
+            //R.z.set(bn_env, H);
+            R.z.copy_from(bn_env, H);
+        } else {
+            //Fp::mul(R.z, H, Q.z);
+            dev_mcl_mul_g2(bn_env, R.z, H, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+        }
+    } else {
+        if (isQzOne) {
+            //Fp::mul(R.z, P.z, H);
+            dev_mcl_mul_g2(bn_env, R.z, P.z, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+        } else {
+            //Fp::mul(R.z, P.z, Q.z);
+            dev_mcl_mul_g2(bn_env, R.z, P.z, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+            //R.z *= H;
+            dev_mcl_mul_g2(bn_env, R.z, R.z, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+        }
+    }
+    //Fp::sqr(H3, H); // H^2
+    dev_mcl_sqr_g2(bn_env, H3, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //Fp::sqr(R.y, r); // r^2
+    dev_mcl_sqr_g2(bn_env, R.y, r, p.mont, p.ptr, cache_buf, cache_t, rp);
+    ///U1 *= H3; // U1 H^2
+    dev_mcl_mul_g2(bn_env, U1, U1, H3, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //H3 *= H; // H^3
+    dev_mcl_mul_g2(bn_env, H3, H3, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //R.y -= U1;
+    dev_mcl_sub_g2(bn_env, R.y, R.y, U1, p.mont);
+    //R.y -= U1;
+    dev_mcl_sub_g2(bn_env, R.y, R.y, U1, p.mont);
+    //Fp::sub(R.x, R.y, H3);
+    dev_mcl_sub_g2(bn_env, R.x, R.y, H3, p.mont);
+    //U1 -= R.x;
+    dev_mcl_sub_g2(bn_env, U1, U1, R.x, p.mont);
+    //U1 *= r;
+    dev_mcl_mul_g2(bn_env, U1, U1, r, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //H3 *= S1;
+    dev_mcl_mul_g2(bn_env, H3, H3, S1, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //Fp::sub(R.y, U1, H3);
+    dev_mcl_sub_g2(bn_env, R.y, U1, H3, p.mont);
+}
+
+inline __device__ void add_g2(env_t& bn_env, DevEct2& R, DevEct2& P, DevEct2& Q,
+        MclFp& one, MclFp& p, const int specialA_, uint32_t* cache_buf, uint32_t* cache_t, MclFp2& a_, 
+        const int mode_, const uint64_t rp, const bool is_prefix_sum = false){
+    if(P.is_zero(bn_env)){
+        R.set(bn_env, Q); 
+        return;
+    }
+    if(Q.is_zero(bn_env)){
+        R.set(bn_env, P);
+        return;
+    }
+    if(&P == &Q){
+        R.dev_dblNoVerifyInfJacobi(bn_env, P, one, p, specialA_, cache_buf, cache_t, a_, rp);
+        return;
+    }
+    bool isPzOne = P.z.is_one(bn_env, one.mont);//dev_is_one(bn_env, P.z.mont, one.mont);
+    bool isQzOne = Q.z.is_one(bn_env, one.mont);//dev_is_one(bn_env, Q.z.mont, one.mont);
+    //if(is_prefix_sum){
+    //    dev_addJacobi_NoPzAndNoQzOne(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
+    //}else{
+        dev_addJacobi_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
+    //}
+}
+
+inline __device__ void load(env_t& bn_env, MclFp2& dst, Fp_model2& src, const int offset){
+    cgbn_load(bn_env, dst.c0.mont, src.c0.mont_repr_data + offset);
+    cgbn_load(bn_env, dst.c1.mont, src.c1.mont_repr_data + offset);
+}
+
+inline __device__ void load(env_t& bn_env, DevEct2& dst, mcl_bn128_g2& src, const int offset){
+    cgbn_load(bn_env, dst.x.c0.mont, src.x.c0.mont_repr_data + offset);
+    cgbn_load(bn_env, dst.x.c1.mont, src.x.c1.mont_repr_data + offset);
+
+    cgbn_load(bn_env, dst.y.c0.mont, src.y.c0.mont_repr_data + offset);
+    cgbn_load(bn_env, dst.y.c1.mont, src.y.c1.mont_repr_data + offset);
+
+    cgbn_load(bn_env, dst.z.c0.mont, src.z.c0.mont_repr_data + offset);
+    cgbn_load(bn_env, dst.z.c1.mont, src.z.c1.mont_repr_data + offset);
+}
+
+inline __device__ void store(env_t& bn_env, mcl_bn128_g2& dst, DevEct2& src, const int offset){
+    cgbn_store(bn_env, dst.x.c0.mont_repr_data + offset, src.x.c0.mont);
+    cgbn_store(bn_env, dst.x.c1.mont_repr_data + offset, src.x.c1.mont);
+
+    cgbn_store(bn_env, dst.y.c0.mont_repr_data + offset, src.y.c0.mont);
+    cgbn_store(bn_env, dst.y.c1.mont_repr_data + offset, src.y.c1.mont);
+
+    cgbn_store(bn_env, dst.z.c0.mont_repr_data + offset, src.z.c0.mont);
+    cgbn_store(bn_env, dst.z.c1.mont_repr_data + offset, src.z.c1.mont);
+}
+
+__global__ void kernel_ect_add_g2(
+    cgbn_error_report_t* report,
+    mcl_bn128_g2 R, 
+    mcl_bn128_g2 P,
+    mcl_bn128_g2 Q,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  __shared__ uint32_t cache_buf[N_32*2+2], cache_t[N_32];
+  DevEct2 lP, lQ;
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lP, P, 0);
+  load(bn_env, lQ, Q, 0);
+  load(bn_env, la, a, 0); 
+
+  load(bn_env, lone, one, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  add_g2(bn_env, lP, lP, lQ, lone, lp, specialA_, cache_buf, cache_t, la, mode_, rp);  
+  store(bn_env, R, lP, 0);
 }
 
 }// namespace gpu
