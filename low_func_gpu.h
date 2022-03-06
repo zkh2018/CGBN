@@ -104,7 +104,8 @@ void gpu_mont_red(uint32_t* z, uint32_t *xy, uint32_t *p, const uint64_t rp);
 void gpu_mul_wide(uint32_t*z, uint32_t*x, uint32_t*y);
 void gpu_sub_wide(uint32_t*z, uint32_t*x, uint32_t*y);
 void gpu_fp2Dbl_mulPreW(uint32_t*z, uint32_t*x, uint32_t*y, uint32_t*p);
-
+void gpu_sqr_g2(uint32_t*y, uint32_t*x, uint32_t*p, const uint64_t rp);
+void gpu_mcl_mul_g2(uint32_t* z, uint32_t*x, uint32_t*y, uint32_t*p, const uint64_t rp);
 
 } // namespace gpu
 

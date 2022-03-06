@@ -66,6 +66,16 @@ void gpu_fp2Dbl_mulPreW(uint32_t*z, uint32_t*x, uint32_t*y, uint32_t*p){
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
   kernel_fp2Dbl_mulPreW<<<1, 8>>>(report, z, x, y, p);
 }
+void gpu_sqr_g2(uint32_t*y, uint32_t*x, uint32_t*p, const uint64_t rp){
+  cgbn_error_report_t *report = nullptr;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  kernel_sqr_g2<<<1, 8>>>(report, y, x, p, rp);
+}
+void gpu_mcl_mul_g2(uint32_t* z, uint32_t*x, uint32_t*y, uint32_t*p, const uint64_t rp){
+  cgbn_error_report_t *report = nullptr;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  kernel_mcl_mul_g2<<<1, 8>>>(report, z, x, y, p, rp);
+}
 
 } // namespace gpu
 
