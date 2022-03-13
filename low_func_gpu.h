@@ -108,6 +108,83 @@ void gpu_sqr_g2(uint32_t*y, uint32_t*x, uint32_t*p, const uint64_t rp);
 void gpu_mcl_mul_g2(uint32_t* z, uint32_t*x, uint32_t*y, uint32_t*p, const uint64_t rp);
 void gpu_mcl_ect_add_g2(mcl_bn128_g2 R, mcl_bn128_g2 P, mcl_bn128_g2 Q, Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int model_, const uint64_t rp);
 
+///mcl_g2
+int mcl_bn128_g2_reduce_sum(
+    mcl_bn128_g2 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    mcl_bn128_g2 partial, 
+    uint32_t *counters,
+    char* flags,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    uint32_t *seconds,
+    mcl_bn128_g2 t_zero,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
+    Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int mode_, const uint64_t rp,
+    const int max_reduce_depth, cudaStream_t stream);
+
+void mcl_split_to_bucket_g2(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 out, 
+    const bool with_density,
+    const char* density,
+    const cgbn_mem_t<BITS>* bn_exponents,
+    const int c, const int k,
+    const int data_length,
+    int *starts,
+    int *indexs, 
+    int* tmp,
+    CudaStream stream);
+
+void mcl_bucket_reduce_sum_g2(
+    mcl_bn128_g2 data,
+    int* starts, int* ends, int* ids,
+    int *d_instance_bucket_ids,
+    mcl_bn128_g2 buckets,
+    const int bucket_num,
+    const int data_size,
+    mcl_bn128_g2 t_zero,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp,
+    CudaStream stream);
+
+void mcl_reverse(mcl_bn128_g2 in, mcl_bn128_g2 out, const int n, const int offset, CudaStream stream);
+
+void mcl_prefix_sum_g2(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 block_sums, 
+    mcl_bn128_g2 block_sums2, 
+    const int n,//2^16
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp,
+    CudaStream stream);
+
+void mcl_bn128_g2_reduce_sum2(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 out, 
+    const uint32_t n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp,
+    CudaStream stream);
+
+
 } // namespace gpu
 
 #endif

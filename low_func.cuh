@@ -2183,6 +2183,698 @@ __global__ void kernel_ect_add_g2(
   store(bn_env, R, lP, 0);
 }
 
+
+template<int BlockInstances>
+__global__ void kernel_mcl_bn128_g2_reduce_sum_one_range5(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 values, 
+    Fp_model scalars,
+    const size_t *index_it,
+    mcl_bn128_g2 partial, 
+    const int ranges_size, 
+    const int range_id_offset,
+    const uint32_t* firsts,
+    const uint32_t* seconds,
+    char* flags,
+    mcl_bn128_g2 t_zero,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  const int local_instance = threadIdx.x / TPI;//0~63
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / TPI;
+
+  const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * BlockInstances;
+  const int first = firsts[range_id_offset + blockIdx.y];
+  const int second = seconds[range_id_offset + blockIdx.y];
+  const int reduce_depth = second - first;//30130
+  if(reduce_depth <= 1) return;
+  const int half_depth = (reduce_depth + 1) / 2;
+
+  context_t bn_context(cgbn_report_monitor, report, instance_offset + instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  if(instance >= half_depth) return;
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * N_32];
+
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lone, one, 0); 
+  load(bn_env, la, a, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  DevEct2 result;
+  if(flags[index_it[first + instance]] == 1){
+      load(bn_env, result, values, first+instance);
+    }else{
+        load(bn_env, result, t_zero, 0);
+      }
+  for(int i = first + instance+half_depth; i < first + reduce_depth; i+= half_depth){
+      const int j = index_it[i];
+      if(flags[j] == 1){
+            DevEct2 dev_b;
+            load(bn_env, dev_b, values, i);
+            add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * N_32, la, mode_, rp);  
+          }
+    }
+  store(bn_env, partial, result, first + instance);
+}
+
+template<int BlockInstances>
+__global__ void kernel_mcl_bn128_g2_reduce_sum_one_range7(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 values, 
+    Fp_model scalars,
+    const size_t *index_it,
+    mcl_bn128_g2 partial, 
+    const int ranges_size, 
+    const int range_id_offset,
+    const uint32_t* firsts,
+    const uint32_t* seconds,
+    char* flags,
+    mcl_bn128_g2 t_zero,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  const int local_instance = threadIdx.x / TPI;//0~63
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / TPI;
+
+  const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * BlockInstances;
+  const int first = firsts[range_id_offset + blockIdx.y];
+  const int second = seconds[range_id_offset + blockIdx.y];
+  const int reduce_depth = second - first;//30130
+  if(reduce_depth <= 1) return;
+  const int half_depth = (reduce_depth + 1) / 2;
+
+  context_t bn_context(cgbn_report_monitor, report, instance_offset + instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  if(instance >= half_depth) return;
+
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * N_32];
+
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lone, one, 0); 
+  load(bn_env, la, a, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  DevEct2 result;
+  load(bn_env, result, values, first+instance);
+  for(int i = first + instance+half_depth; i < first + reduce_depth; i+= half_depth){
+        DevEct2 dev_b;
+        load(bn_env, dev_b, values, i);
+        add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32*2+2), cache_t + local_instance * N_32, la, mode_, rp);  
+        //add(bn_env, result, result, dev_b, lone, lp, specialA_, cache, cache_buf, cache_t, la, mode_, rp);  
+    }
+  store(bn_env, partial, result, first + instance);
+}
+
+__global__ void kernel_mcl_bn128_g2_reduce_sum_one_range6(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 partial, 
+    const int n, 
+    const uint32_t* firsts,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int instance = threadIdx.x / TPI;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  __shared__ uint32_t cache_buf[N_32*2+2], cache_t[N_32];
+
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lone, one, 0); 
+  load(bn_env, la, a, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  DevEct2 result;
+  load(bn_env, result, partial, firsts[0]);
+
+  for(int i = 1; i < n; i++){
+      DevEct2 dev_b;
+      load(bn_env, dev_b, partial, firsts[i]);
+      add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf, cache_t, la, mode_, rp);  
+    }
+  store(bn_env, partial, result, 0);
+}
+
+int mcl_bn128_g2_reduce_sum(
+    mcl_bn128_g2 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    mcl_bn128_g2 partial, 
+    uint32_t *counters,
+    char* flags,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    uint32_t *seconds,
+    mcl_bn128_g2 t_zero,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
+    Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int mode_, const uint64_t rp,
+    const int max_reduce_depth, cudaStream_t stream
+    ){
+  cgbn_error_report_t *report = get_error_report();
+
+  uint32_t threads = 512;
+  const int local_instances = 64 * BlockDepth;
+  uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
+  dim3 blocks(block_x, ranges_size, 1);
+  kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+
+  int n = max_reduce_depth;
+  const int local_instances2 = 64;
+  threads = local_instances2 * TPI;
+  uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
+  dim3 blocks2(block_x2, ranges_size, 1);
+  kernel_mcl_bn128_g2_reduce_sum_one_range5<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(report, values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+  const int update_threads = 64;
+  const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
+  kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
+  //CUDA_CHECK(cudaDeviceSynchronize());
+    n = (n+1)/2;
+      while(n>=2){
+          uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
+          dim3 blocks2(block_x2, ranges_size, 1);
+          kernel_mcl_bn128_g2_reduce_sum_one_range7<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(report, partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+          //CUDA_CHECK(cudaDeviceSynchronize());
+              kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
+                  //CUDA_CHECK(cudaDeviceSynchronize());
+                  n = (n+1)/2;
+                    }
+        kernel_mcl_bn128_g2_reduce_sum_one_range6<<<1, TPI, 0, stream>>>(report, partial, ranges_size, firsts, one, p, a, specialA_, mode_, rp);
+          //CUDA_CHECK(cudaDeviceSynchronize());
+          return 0;
+}
+
+__global__ void kernel_mcl_split_to_bucket_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data,
+    mcl_bn128_g2 buckets,
+    const int data_length,
+    const int bucket_num,
+    const int* starts,
+    const int* value_ids,
+    const int* bucket_ids){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  if(instance >= data_length) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  int bucket_id = bucket_ids[instance];
+  if(bucket_id > 0 && bucket_id < bucket_num){
+      int src_i = value_ids[instance];
+      int dst_i = instance;
+          DevEct2 a;
+          load(bn_env, a, data, src_i);
+          store(bn_env, buckets, a, dst_i);
+    }
+}
+
+void mcl_split_to_bucket_g2(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 out, 
+    const bool with_density,
+    const char* density,
+    const cgbn_mem_t<BITS>* bn_exponents,
+    const int c, const int k,
+    const int data_length,
+    int *starts,
+    int *indexs, 
+    int* tmp,
+    CudaStream stream){
+  int threads = 512;
+  int blocks = (data_length + threads-1) / threads;
+  const int bucket_num = (1<<c);
+  int *bucket_ids = tmp, *value_ids = tmp + data_length;
+  kernel_mcl_get_bid_and_counter<<<blocks, threads, 0, stream>>>(bn_exponents, c, k, data_length, bucket_num, indexs, bucket_ids, value_ids); 
+  thrust::sort_by_key(thrust::cuda::par.on(stream), bucket_ids, bucket_ids + data_length, value_ids); 
+
+  cgbn_error_report_t *report = get_error_report();
+  blocks = (data_length + 63) / 64;
+  kernel_mcl_split_to_bucket_g2<<<blocks, threads, 0, stream>>>(report, data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
+}
+
+template<int BlockInstances>
+__global__ void kernel_mcl_bucket_reduce_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data,
+    const int *starts, 
+    const int *ends,
+    const int *bucket_ids,
+    const int *bucket_tids,
+    const int total_instances,
+    mcl_bn128_g2 t_zero,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  int local_instance = threadIdx.x / TPI;
+  if(instance >= total_instances) return;
+  int bucket_id = bucket_ids[instance];
+  int start = starts[bucket_id];
+  int bucket_size = ends[bucket_id] - start;
+  if(bucket_size <= 1) return;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * N_32];
+  int half_bucket_size = bucket_size / 2;
+  int bucket_instance = bucket_tids[instance];
+
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lone, one, 0); 
+  load(bn_env, la, a, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  DevEct2 result;
+  load(bn_env, result, data, start + bucket_instance);
+  for(int i = bucket_instance + half_bucket_size; i < bucket_size; i+= half_bucket_size){
+    DevEct2 other;
+    load(bn_env, other, data, start + i);
+    add_g2(bn_env, result, result, other, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * N_32, la, mode_, rp);  
+  }
+  store(bn_env, data, result, start + bucket_instance);
+}
+
+template<int Offset>
+__global__ void kernel_mcl_copy_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data,
+    int* starts, 
+    int* ends, 
+    mcl_bn128_g2 buckets,
+    mcl_bn128_g2 zero,
+    const int bucket_num){
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / TPI;
+  if(instance >= bucket_num) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  int bid = instance;
+  int start = starts[bid];
+  int end = ends[bid];
+  if(end - start == 0){
+        DevEct2 dev_zero;
+        load(bn_env, dev_zero, zero, 0);
+        store(bn_env, buckets, dev_zero, bid * Offset);
+    }else{
+          DevEct2 a;
+          load(bn_env, a, data, start);
+          store(bn_env, buckets, a, bid * Offset);
+      }
+}
+
+void mcl_bucket_reduce_sum_g2(
+    mcl_bn128_g2 data,
+    int* starts, int* ends, int* ids,
+    int *d_instance_bucket_ids,
+    mcl_bn128_g2 buckets,
+    const int bucket_num,
+    const int data_size,
+    mcl_bn128_g2 t_zero,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp,
+    CudaStream stream){
+  cgbn_error_report_t *report = get_error_report();
+  int *half_sizes, *bucket_ids;
+  int* bucket_tids = d_instance_bucket_ids;
+  half_sizes = ids;
+  bucket_ids = d_instance_bucket_ids + data_size;
+  int threads = 256;
+  int blocks = (bucket_num + threads-1) / threads;
+  kernel_mcl_calc_bucket_half_size<<<blocks, threads, 0, stream>>>(starts, ends, half_sizes, bucket_num);
+  //CUDA_CHECK(cudaDeviceSynchronize());
+  while(1){
+    thrust::inclusive_scan(thrust::cuda::par.on(stream), half_sizes, half_sizes + bucket_num, half_sizes);
+    //CUDA_CHECK(cudaDeviceSynchronize());
+    threads = 256;
+    blocks = (bucket_num + threads-1) / threads;
+    kernel_mcl_get_bucket_tids<<<blocks, threads>>>(half_sizes, bucket_num, bucket_tids, bucket_ids);
+    //CUDA_CHECK(cudaDeviceSynchronize());
+    int total_instances = 0;
+    CUDA_CHECK(cudaMemcpyAsync(&total_instances, half_sizes + bucket_num-1, sizeof(int), cudaMemcpyDeviceToHost, stream)); 
+    sync(stream); 
+    if(total_instances == 0) break;
+    const int local_instances = 32;
+    threads = local_instances * TPI;
+    blocks = (total_instances + local_instances - 1) / local_instances;
+    kernel_mcl_bucket_reduce_g2<local_instances><<<blocks, threads, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+    //CUDA_CHECK(cudaDeviceSynchronize());
+    threads = 256;
+    blocks = (bucket_num + threads-1) / threads;
+    kernel_mcl_update_ends2<<<blocks, threads, 0, stream>>>(starts, half_sizes, ends, bucket_num);
+    //CUDA_CHECK(cudaDeviceSynchronize());
+  }
+  threads = 512;
+  int local_instances = 64;
+  blocks = (bucket_num + local_instances-1) / local_instances;
+  kernel_mcl_copy_g2<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, t_zero, bucket_num);
+}
+
+__global__ void kernel_mcl_reverse_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data, mcl_bn128_g2 out, int n, int offset){
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int instance = tid / TPI;
+  int local_instances = blockDim.x / TPI;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  for(int i = instance; i < n; i += gridDim.x * local_instances){
+      int in_i = i * offset;
+      int out_i = n - i - 1;
+      DevEct2 a;
+      load(bn_env, a, data, in_i);
+      store(bn_env, out, a, out_i);
+    }
+}
+
+void mcl_reverse_g2(mcl_bn128_g2 in, mcl_bn128_g2 out, const int n, const int offset, CudaStream stream){
+  const int threads = 512;
+  cgbn_error_report_t *report = get_error_report();
+  int reverse_blocks = (n + 63) / 64;
+  kernel_mcl_reverse_g2<<<reverse_blocks, threads, 0, stream>>>(report, in, out, n, offset);
+  //CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+template<int BlockInstances, int ReduceDepthPerBlock>
+__global__ void kernel_mcl_prefix_sum_pre_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data, 
+    const int n,
+    int stride,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockDim.x * blockIdx.x;
+  int instance = tid / TPI;
+  int local_instance = threadIdx.x / TPI;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * N_32];
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lone, one, 0); 
+  load(bn_env, la, a, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  int offset = blockIdx.x * ReduceDepthPerBlock;
+  int index = (local_instance + 1) * stride * 2 - 1;
+  if(index < ReduceDepthPerBlock && offset + index < n){
+      DevEct2 dev_a, dev_b;
+      load(bn_env, dev_a, data, offset + index);
+      load(bn_env, dev_b, data, offset + index - stride);
+      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * N_32, la, mode_, rp, true);  
+      store(bn_env, data, dev_a, offset + index);
+    }
+}
+
+template<int BlockInstances, int ReduceDepthPerBlock>
+__global__ void kernel_mcl_prefix_sum_post_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 block_sums, 
+    const int n,
+    int stride, bool save_block_sum,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockDim.x * blockIdx.x;
+  int instance = tid / TPI;
+  int local_instance = threadIdx.x / TPI;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * N_32];
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lone, one, 0); 
+  load(bn_env, la, a, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  int offset = blockIdx.x * ReduceDepthPerBlock;
+  int index = (local_instance + 1) * stride * 2 - 1;
+  if(index + stride < ReduceDepthPerBlock && offset + index + stride < n){
+      DevEct2 dev_a, dev_b;
+      load(bn_env, dev_a, data, offset + index + stride);
+      load(bn_env, dev_b, data, offset + index);
+      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * N_32, la, mode_, rp, true);  
+      store(bn_env, data, dev_a, offset + index + stride);
+    }
+  if(save_block_sum && local_instance == 0){
+      DevEct2 dev_a;
+      load(bn_env, dev_a, data, blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock - 1);
+      store(bn_env, block_sums, dev_a, blockIdx.x);
+    }
+}
+
+template<int Instances, int RealInstances, bool SaveBlockSum>
+__global__ void kernel_mcl_prefix_sum_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 block_sums, 
+    const int n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  int local_instance = threadIdx.x / TPI;
+  int local_instances = Instances;
+  if(instance >= n) return;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache_buf[RealInstances*(N_32*2+2)], cache_t[RealInstances * N_32];
+    MclFp lone, lp;
+    MclFp2 la;
+    load(bn_env, lone, one, 0); 
+    load(bn_env, la, a, 0); 
+    load(bn_env, lp, p, 0); 
+    lp.ptr = (uint32_t*)p.mont_repr_data;
+
+    int offset = blockIdx.x * local_instances;
+    for(int stride = 1; stride <= RealInstances; stride *= 2){
+            __syncthreads();
+            int index = (local_instance+1)*stride*2 - 1; 
+            if(index < Instances && offset + index < n){
+                        DevEct2 dev_a, dev_b;
+                        load(bn_env, dev_a, data, offset + index);
+                        load(bn_env, dev_b, data, offset + index - stride);
+                        add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * N_32, la, mode_, rp, true);  
+                        store(bn_env, data, dev_a, offset + index);
+                    }
+            __syncthreads();
+        }
+    for (unsigned int stride = (Instances >> 1); stride > 0 ; stride>>=1) {
+            __syncthreads();
+            int index = (local_instance+1)*stride*2 - 1;
+            if(index + stride < Instances && offset + index + stride < n){
+                        DevEct2 dev_a, dev_b;
+                        load(bn_env, dev_a, data, offset + index + stride);
+                        load(bn_env, dev_b, data, offset + index);
+                        add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * N_32, la, mode_, rp, true);  
+                        store(bn_env, data, dev_a, offset + index + stride);
+                    }
+        }
+    __syncthreads();
+    if(SaveBlockSum && local_instance == 0){
+            DevEct2 dev_a;
+            load(bn_env, dev_a, data, blockIdx.x * local_instances + local_instances-1);
+            store(bn_env, block_sums, dev_a, blockIdx.x);
+        }
+}
+
+template<int BlockInstances>
+__global__ void kernel_mcl_add_block_sum_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 block_sums, 
+    const int n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  const int instances = BlockInstances;
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int instance = i / TPI;
+  int local_instance = threadIdx.x / TPI;
+  if(instances + instance >= n) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * N_32];
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lone, one, 0); 
+  load(bn_env, la, a, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  DevEct2 dev_block_sum, dev_a;
+  load(bn_env, dev_block_sum, block_sums, blockIdx.x);
+  load(bn_env, dev_a, data, instance + instances);//offset = instances
+  add_g2(bn_env, dev_a, dev_a, dev_block_sum, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * N_32, la, mode_, rp);  
+  store(bn_env, data, dev_a, instance + instances);
+}
+
+void mcl_prefix_sum_g2(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 block_sums, 
+    mcl_bn128_g2 block_sums2, 
+    const int n,//2^16
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp,
+    CudaStream stream){
+  cgbn_error_report_t *report = get_error_report();
+  const int threads = 512;
+  int instances = threads / TPI;//64
+  int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
+  int prefix_sum_blocks2 = (prefix_sum_blocks + instances-1) / instances;//2^4
+
+  for(int stride = 1; stride <= 32; stride *= 2){
+      int instances = 32 / stride;
+      int threads = instances * TPI;
+      kernel_mcl_prefix_sum_pre_g2<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(report, data, n, stride, one, p, a, specialA_, mode_, rp);
+    }
+  for(int stride = 32; stride > 0; stride /= 2){
+      int instances = 32 / stride;
+      int threads = instances * TPI;
+      bool save_block_sum = (stride == 1);
+      kernel_mcl_prefix_sum_post_g2<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(report, data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+    }
+
+  for(int stride = 1; stride <= 32; stride *= 2){
+      int instances = 32 / stride;
+      int threads = instances * TPI;
+      kernel_mcl_prefix_sum_pre_g2<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(report, block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
+    }
+  for(int stride = 32; stride > 0; stride /= 2){
+      int instances = 32 / stride;
+      int threads = instances * TPI;
+      bool save_block_sum = (stride == 1);
+      kernel_mcl_prefix_sum_post_g2<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+    }
+  
+  kernel_mcl_prefix_sum_g2<16, 8, false><<<1, 128/2, 0, stream>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, one, p, a, specialA_, mode_, rp);
+  kernel_mcl_add_block_sum_g2<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, one, p, a, specialA_, mode_, rp);
+  kernel_mcl_add_block_sum_g2<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(report, data, block_sums, n, one, p, a, specialA_, mode_, rp);
+  //CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+template<int BlockInstances>
+__global__ void kernel_mcl_reduce_sum_g2(
+    cgbn_error_report_t* report, 
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 out, 
+    const int half_n,
+    const int n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int instance = tid / TPI;
+  if(instance >= half_n) return;
+  int local_instance = threadIdx.x / TPI;
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * N_32];
+  MclFp lone, lp;
+  MclFp2 la;
+  load(bn_env, lone, one, 0); 
+  load(bn_env, la, a, 0); 
+  load(bn_env, lp, p, 0); 
+  lp.ptr = (uint32_t*)p.mont_repr_data;
+
+  DevEct2 dev_a;
+  load(bn_env, dev_a, data, instance);
+  for(int i = instance + half_n; i < n; i+= half_n){
+      DevEct2 dev_b;
+      load(bn_env, dev_b, data, i);
+      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * N_32, la, mode_, rp);  
+    }
+  store(bn_env, out, dev_a, instance);
+}
+
+void mcl_bn128_g2_reduce_sum2(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 out, 
+    const uint32_t n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp,
+    CudaStream stream){
+  cgbn_error_report_t *report = get_error_report();
+  int len = n-1;
+  const int instances = 32;
+  int threads = instances * TPI;
+  int half_len = (len + 1) / 2;
+  int blocks = (half_len + instances - 1) / instances;
+  kernel_mcl_reduce_sum_g2<instances><<<blocks, threads, 0, stream>>>(report, data, out, half_len, len, one, p, a, specialA_, mode_, rp);
+  len = half_len;
+  while(len > 1){
+    int half_len = (len + 1) / 2;
+    int blocks = (half_len + instances - 1) / instances;
+    kernel_mcl_reduce_sum_g2<instances><<<blocks, threads, 0, stream>>>(report, out, out, half_len, len, one, p, a, specialA_, mode_, rp);
+    len = half_len;
+  }
+}
+
+
 }// namespace gpu
 
 #endif
