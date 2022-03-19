@@ -157,7 +157,7 @@ void mcl_bucket_reduce_sum_g2(
     const uint64_t rp,
     CudaStream stream);
 
-void mcl_reverse(mcl_bn128_g2 in, mcl_bn128_g2 out, const int n, const int offset, CudaStream stream);
+void mcl_reverse_g2(mcl_bn128_g2 in, mcl_bn128_g2 out, const int n, const int offset, CudaStream stream);
 
 void mcl_prefix_sum_g2(
     mcl_bn128_g2 data, 
