@@ -1612,14 +1612,16 @@ __global__ void kernel_mcl_add_g2(
 inline __device__ void dev_mont_red(env_t& bn_env, 
         env_t::cgbn_t& lz, env_t::cgbn_wide_t& lxy, env_t::cgbn_t& lp, 
         uint32_t* p, uint32_t *buf, uint32_t *pq, const uint64_t rp){
-        cgbn_store(bn_env, buf, lxy._low);
-        cgbn_store(bn_env, buf + 8, lxy._high);
         const int group_id = threadIdx.x & (TPI-1);
         uint64_t *p64_buf = (uint64_t*)buf;
         uint64_t* p64_pq = (uint64_t*)pq;
-        if(group_id == 0){
-            p64_buf[N_64*2] = 0;
-        }
+        p64_buf[group_id + 1] = 0;
+
+        cgbn_store(bn_env, buf, lxy._low);
+        cgbn_store(bn_env, buf + 8, lxy._high);
+        //if(group_id == 0){
+        //    p64_buf[N_64*2] = 0;
+        //}
         uint32_t th[2];
         env_t::cgbn_wide_t lwt;
         cgbn_get_ui64(bn_env, lxy._low, th, 0);
@@ -1629,9 +1631,9 @@ inline __device__ void dev_mont_red(env_t& bn_env,
         cgbn_mul_ui64(bn_env, lwt, lp, q);
         cgbn_store(bn_env, pq, lwt._low);
         cgbn_get_ui64(bn_env, lwt._high, th, 0);
-        if(group_id == 0){
+        //if(group_id == 0){
             p64_pq[N_64] = *(uint64_t*)th;
-        }
+        //}
         env_t::cgbn_t lc;
         //buf = pq + xy
         uint32_t carry = cgbn_add(bn_env, lc, lxy._low, lwt._low);
@@ -1639,16 +1641,21 @@ inline __device__ void dev_mont_red(env_t& bn_env,
         cgbn_get_ui64(bn_env, lxy._high, th, 0);
 
         uint64_t buf4 = carry + *(uint64_t*)th + p64_pq[N_64];
-        if(group_id == 0){
+        //if(group_id == 0){
             p64_buf[N_64] = buf4;
-        }
+        //}
 
-        if(buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64]){
-            env_t::cgbn_t la;
-            cgbn_load(bn_env, la, buf + N_32 + 2);     
-            cgbn_add_ui32(bn_env, la, la, 1); 
-            cgbn_store(bn_env, buf + N_32 + 2, la);
-        }
+        int flag = buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64];
+        env_t::cgbn_t la;
+        cgbn_load(bn_env, la, buf + N_32 + 2);     
+        cgbn_add_ui32(bn_env, la, la, flag); 
+        cgbn_store(bn_env, buf + N_32 + 2, la);
+        //if(buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64]){
+        //    env_t::cgbn_t la;
+        //    cgbn_load(bn_env, la, buf + N_32 + 2);     
+        //    cgbn_add_ui32(bn_env, la, la, 1); 
+        //    cgbn_store(bn_env, buf + N_32 + 2, la);
+        //}
 
         uint64_t *c = p64_buf + 1;
         for(int i = 1; i < 4; i++){
@@ -1657,9 +1664,9 @@ inline __device__ void dev_mont_red(env_t& bn_env,
             cgbn_mul_ui64(bn_env, lwt, lp, q);
             cgbn_store(bn_env, pq, lwt._low);
             cgbn_get_ui64(bn_env, lwt._high, th, 0);
-            if(group_id == 0){
+            //if(group_id == 0){
                 p64_pq[N_64] = *(uint64_t*)th;
-            }
+            //}
             cgbn_load(bn_env, lc, (uint32_t*)c);
             //c = c + pq
             carry = cgbn_add(bn_env, lc, lc, lwt._low);
@@ -1667,16 +1674,22 @@ inline __device__ void dev_mont_red(env_t& bn_env,
 
             //c[N] += pq[N]
             buf4 = carry + c[N_64] + *(uint64_t*)th;
-            if(group_id == 0){
+            //if(group_id == 0){
                 c[N_64] = buf4;
-            }
-            if(buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64]){
-                env_t::cgbn_t la;
-                cgbn_load(bn_env, la, (uint32_t*)(c + N_64 + 1));     
-                cgbn_add_ui32(bn_env, la, la, 1); 
-                if(group_id < N_32 - i * 2)
-                    cgbn_store(bn_env, (uint32_t*)(c + N_64 + 1), la);
-            }
+            //}
+            int flag = buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64];
+            env_t::cgbn_t la;
+            cgbn_load(bn_env, la, (uint32_t*)(c + N_64 + 1));     
+            cgbn_add_ui32(bn_env, la, la, flag); 
+            if(group_id < N_32 - i * 2)
+                cgbn_store(bn_env, (uint32_t*)(c + N_64 + 1), la);
+            //if(buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64]){
+            //    env_t::cgbn_t la;
+            //    cgbn_load(bn_env, la, (uint32_t*)(c + N_64 + 1));     
+            //    cgbn_add_ui32(bn_env, la, la, 1); 
+            //    if(group_id < N_32 - i * 2)
+            //        cgbn_store(bn_env, (uint32_t*)(c + N_64 + 1), la);
+            //}
             c++;
         }
         cgbn_load(bn_env, lc, (uint32_t*)c);
@@ -1684,7 +1697,8 @@ inline __device__ void dev_mont_red(env_t& bn_env,
         if(c[N_64] == 0 && carry){
             cgbn_set(bn_env, lz, lc);
         }
-}
+}//    
+
 __global__ void kernel_mont_red(
     cgbn_error_report_t* report, 
     uint32_t* z, uint32_t*xy, uint32_t* p, const uint64_t rp){
@@ -2155,11 +2169,11 @@ inline __device__ void add_g2(env_t& bn_env, DevEct2& R, DevEct2& P, DevEct2& Q,
     }
     bool isPzOne = P.z.is_one(bn_env, one.mont);//dev_is_one(bn_env, P.z.mont, one.mont);
     bool isQzOne = Q.z.is_one(bn_env, one.mont);//dev_is_one(bn_env, Q.z.mont, one.mont);
-    if(is_prefix_sum){
-        dev_addJacobi_NoPzAndNoQzOne_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
-    }else{
+    //if(is_prefix_sum){
+    //    dev_addJacobi_NoPzAndNoQzOne_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
+    //}else{
         dev_addJacobi_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
-    }
+    //}
 }
 
 inline __device__ void load(env_t& bn_env, MclFp2& dst, Fp_model2& src, const int offset){
@@ -2330,8 +2344,7 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range7(
         DevEct2 dev_b;
         load(bn_env, dev_b, values, i);
         add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32*2+2), cache_t + local_instance * (N_32+2), la, mode_, rp);  
-        //add(bn_env, result, result, dev_b, lone, lp, specialA_, cache, cache_buf, cache_t, la, mode_, rp);  
-    }
+  }
   store(bn_env, partial, result, first + instance);
 }
 
@@ -2416,10 +2429,9 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum(
   for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * local_instances){
     const int j = index_it[i];
     if(flags[j] == 1){
-        DevEct2 dev_b, dev_c;
+        DevEct2 dev_b;
         load(bn_env, dev_b, values, i);
-        add_g2(bn_env, dev_c, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32 + 2), la, mode_, rp);  
-        result.set(bn_env, dev_c);
+        add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32 + 2), la, mode_, rp);  
     }
   }
   store(bn_env, partial, result, offset + instance);
@@ -2456,10 +2468,9 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_after(
   DevEct2 result;
   load(bn_env, result, partial, instance);
   for(int i = half_n; i < n; i+= half_n){
-	  DevEct2 dev_b, dev_c;
+	  DevEct2 dev_b;
 	  load(bn_env, dev_b, partial, instance + i);
-      add_g2(bn_env, dev_c, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32 + 2), la, mode_, rp);  
-     result.set(bn_env, dev_c);
+      add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32 + 2), la, mode_, rp);  
   }
   store(bn_env, partial, result, instance);
 }
