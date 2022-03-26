@@ -220,7 +220,7 @@ template<class env_t>
 __host__ __device__ __forceinline__ void cgbn_mul_ui64(env_t env, typename env_t::cgbn_wide_t &r, const typename env_t::cgbn_t &a, const uint64_t mul) {
   //uint32_t *b32 = (uint32_t*)&mul;
   uint32_t tmp2 = cgbn_mul_ui32(env, r._high, a, ((uint32_t*)mul)[0]); 
-  uint32_t tmp1 = cgbn_mul_ui32(env, r._low, a, ((uint32_t*)b32)[1]); 
+  uint32_t tmp1 = cgbn_mul_ui32(env, r._low, a, ((uint32_t*)mul)[1]); 
   uint32_t carry = cgbn_get_ui32(env, r._high, 0);
   cgbn_shift_right(env, r._high, r._high, 32);
   uint32_t tmp3 = cgbn_add(env, r._low, r._low, r._high);
