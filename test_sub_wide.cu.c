@@ -1,6 +1,9 @@
 #include <gmp.h>
 #include "cgbn/cgbn.h"
 #include <stdint.h>
+#include <vector>
+#include <iostream>
+using namespace std;
 
 #define TPI 8
 #define BITS 256
@@ -20,13 +23,9 @@ __global__ void kernel_sub_wide(
   cgbn_load(bn_env, ly._low, y);
   cgbn_load(bn_env, ly._high, y + 8);
   if(cgbn_compare(bn_env, lx._low, ly._low) >= 0){
-    if(threadIdx.x == 0)
-    printf("first...\n");
     cgbn_sub(bn_env, lz._low, lx._low, ly._low);
     cgbn_sub(bn_env, lz._high, lx._high, ly._high);
   }else{
-    if(threadIdx.x == 0)
-    printf("second...\n");
     env_t::cgbn_t max;
     cgbn_set(bn_env, max, 0xffffffff);
     cgbn_sub(bn_env, lz._low, max, ly._low);
@@ -86,15 +85,9 @@ struct MclFp2{
 
 inline __device__ uint32_t dev_sub_wide(env_t& bn_env, env_t::cgbn_wide_t& lz, env_t::cgbn_wide_t& lx, env_t::cgbn_wide_t& ly){
   if(cgbn_compare(bn_env, lx._low, ly._low) >= 0){
-    if(threadIdx.x == 0){
-        printf("first..\n");
-    }
     cgbn_sub(bn_env, lz._low, lx._low, ly._low);
     return cgbn_sub(bn_env, lz._high, lx._high, ly._high);
   }else{
-    if(threadIdx.x == 0){
-        printf("second..\n");
-    }
     env_t::cgbn_t max;
     env_t::cgbn_wide_t tmpz;
     cgbn_set(bn_env, max, 0xffffffff);
@@ -125,78 +118,18 @@ inline __device__ void dev_fp2Dbl_mulPreW(
     cgbn_add(bn_env, t.mont, y.c0.mont, y.c1.mont);  
     //FpDbl::mulPre(d1, s, t);
     cgbn_mul_wide(bn_env, z.b, s.mont, t.mont); 
-
-    __shared__ uint32_t tmp[64];
-    cgbn_store(bn_env, tmp, z.b._low);
-    cgbn_store(bn_env, tmp + 8, z.b._high);
-    if(threadIdx.x == 0){
-        printf("gpu:\n");
-        printf("d1:");
-        for(int i = 0; i < 8; i++){
-            printf("%lu ", ((uint64_t*)tmp)[i]);
-        }
-        printf("\n");
-    }
-
     //FpDbl::mulPre(d0, a, c);
     cgbn_mul_wide(bn_env, z.a, x.c0.mont, y.c0.mont); 
     //FpDbl::mulPre(d2, b, d);
     env_t::cgbn_wide_t d2;
     cgbn_mul_wide(bn_env, d2, x.c1.mont, y.c1.mont); 
 
-    cgbn_store(bn_env, tmp, z.b._low);
-    cgbn_store(bn_env, tmp + 8, z.b._high);
-    if(threadIdx.x == 0){
-        printf("d1:");
-        for(int i = 0; i < 8; i++){
-            printf("%lu ", ((uint64_t*)tmp)[i]);
-        }
-        printf("\n");
-    }
-    cgbn_store(bn_env, tmp, z.a._low);
-    cgbn_store(bn_env, tmp + 8, z.a._high);
-    if(threadIdx.x == 0){
-        printf("d0:");
-        for(int i = 0; i < 8; i++){
-            printf("%lu ", ((uint64_t*)tmp)[i]);
-        }
-        printf("\n");
-    }
-    cgbn_store(bn_env, tmp, d2._low);
-    cgbn_store(bn_env, tmp + 8, d2._high);
-    if(threadIdx.x == 0){
-        printf("d2:");
-        for(int i = 0; i < 8; i++){
-            printf("%lu ", ((uint64_t*)tmp)[i]);
-        }
-        printf("\n");
-    }
-    
-    
     // FpDbl::subPre(d1, d1, d0);
     dev_sub_wide(bn_env, z.b, z.b, z.a);
 
-    cgbn_store(bn_env, tmp, z.b._low);
-    cgbn_store(bn_env, tmp + 8, z.b._high);
-    if(threadIdx.x == 0){
-        printf("d1:");
-        for(int i = 0; i < 8; i++){
-            printf("%lu ", ((uint64_t*)tmp)[i]);
-        }
-        printf("\n");
-    }
     //FpDbl::subPre(d1, d1, d2);
     dev_sub_wide(bn_env, z.b, z.b, d2);
 
-    cgbn_store(bn_env, tmp, z.b._low);
-    cgbn_store(bn_env, tmp + 8, z.b._high);
-    if(threadIdx.x == 0){
-        printf("d1:");
-        for(int i = 0; i < 8; i++){
-            printf("%lu ", ((uint64_t*)tmp)[i]);
-        }
-        printf("\n");
-    }
     //FpDbl::sub(d0, d0, d2);
     if(dev_sub_wide(bn_env, z.a, z.a, d2)){
         cgbn_add(bn_env, z.a._high, z.a._high, lp);
@@ -206,50 +139,103 @@ inline __device__ void dev_fp2Dbl_mulPreW(
 __global__ void kernel_fp2Dbl_mulPreW(
     cgbn_error_report_t* report, 
     uint32_t* z, uint32_t* x, uint32_t* y,
-    uint32_t *p
+    uint32_t *p,
+    const int n
 ){
-  context_t bn_context(cgbn_report_monitor, report, 0);
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int instance = tid / 8;
+    if(instance >= n) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
   Fp2Dbl lz;
   MclFp2 lx, ly;
-  cgbn_load(bn_env, lx.c0.mont, x);
-  cgbn_load(bn_env, lx.c1.mont, x + 8);
-  cgbn_load(bn_env, ly.c0.mont, y);
-  cgbn_load(bn_env, ly.c1.mont, y + 8);
+  cgbn_load(bn_env, lx.c0.mont, x + instance * 16);
+  cgbn_load(bn_env, lx.c1.mont, x + instance * 16 + 8);
+  cgbn_load(bn_env, ly.c0.mont, y + instance * 16);
+  cgbn_load(bn_env, ly.c1.mont, y + instance * 16 + 8);
   env_t::cgbn_t lp;
   cgbn_load(bn_env, lp, p);
   dev_fp2Dbl_mulPreW(bn_env, lz, lx, ly, lp);
-  cgbn_store(bn_env, z, lz.a._low);
-  cgbn_store(bn_env, z + 8, lz.a._high);
-  cgbn_store(bn_env, z + 16, lz.b._low);
-  cgbn_store(bn_env, z + 24, lz.b._high);
+  cgbn_store(bn_env, z + instance * 32, lz.a._low);
+  cgbn_store(bn_env, z + instance * 32 + 8, lz.a._high);
+  cgbn_store(bn_env, z + instance * 32 + 16, lz.b._low);
+  cgbn_store(bn_env, z + instance * 32 + 24, lz.b._high);
 }
 
 void test_mulPreW(){
     uint64_t x[8] = {17504212154399292175, 13406480092263516530, 11052506301539585977, 370724817334823578, 2738505452492009767, 11348385648817470847, 5987438616802946354, 2267050511450853472};
     uint64_t y[8] = {9346595941626535758, 6891782256290078197, 8914842573943073617, 3049015830585680570, 854176251880143851, 909606410567745456, 6999250755325914748, 1124442457008671669};
     uint64_t p[4] = {4332616871279656263, 10917124144477883021, 13281191951274694749, 3486998266802970665};
+    const int n = 16000;
+    std::vector<uint64_t> all_x(n * 8), all_y(n * 8), all_z(n * 16);
+    for(int i = 0; i < n; i++){
+        memcpy(&all_x[i * 8], x, 8 * sizeof(int64_t)); 
+        memcpy(&all_y[i * 8], y, 8 * sizeof(int64_t)); 
+    }
 
     {
         
+        clock_t start = clock();
+        for(int i = 0; i < n; i++){
+            uint64_t d0[8], d1[8], d2[8];
+            uint64_t s[4], t[4];
+            uint64_t *x = &all_x[i * 8];
+            uint64_t *y = &all_y[i * 8];
+            mpn_add_n(s, x, &x[4], 4); 
+            mpn_add_n(t, y, &y[4], 4); 
+            mpn_mul_n(d1, s, t, 4);
+            mpn_mul_n(d0, x, y, 4);
+            mpn_mul_n(d2, &x[4], &y[4], 4); 
+            mpn_sub_n(d1, d1, d0, 8);
+            mpn_sub_n(d1, d1, d2, 8);
+            if(mpn_sub_n(d0, d0, d2, 8)){
+                mpn_add_n(&d0[4], &d0[4], p, 4);
+            }
+            memcpy(&all_z[i * 16], d0, 8 * sizeof(int64_t));
+            memcpy(&all_z[i * 16 + 8], d1, 8 * sizeof(int64_t));
+        }
+        clock_t end = clock();
+        printf("cpu time: %fus\n", 1000*1000*(double)(end-start)/CLOCKS_PER_SEC);
+
+        ///for(int i = 0; i < 8; i++){
+        ///    printf("%lu ", d0[i]);
+        ///}
+        ///for(int i = 0; i < 8; i++){
+        ///    printf("%lu ", d1[i]);
+        ///}
+        ///printf("\n");
     }
-    uint64_t z[16];
+    ///uint64_t z[16];
+    std::vector<uint64_t> z(n * 16);
     uint32_t *d_x, *d_y, *d_z, *d_p;
-    cudaMalloc((void**)&d_x, 64);
-    cudaMalloc((void**)&d_y, 64);
-    cudaMalloc((void**)&d_z, 128);
+    cudaMalloc((void**)&d_x, n * 64);
+    cudaMalloc((void**)&d_y, n * 64);
+    cudaMalloc((void**)&d_z, n * 128);
     cudaMalloc((void**)&d_p, 32);
-    cudaMemcpy(d_x, x, 64, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_y, y, 64, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_x, all_x.data(), n * 64, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_y, all_y.data(), n * 64, cudaMemcpyHostToDevice);
     cudaMemcpy(d_p, p, 32, cudaMemcpyHostToDevice);
     cgbn_error_report_t* report = nullptr;
     cgbn_error_report_alloc(&report); 
-    kernel_fp2Dbl_mulPreW<<<1, 8>>>(report, d_z, d_x, d_y, d_p);
-    cudaMemcpy(z, d_z, 128, cudaMemcpyDeviceToHost);
-    for(int i = 0; i < 16; i++){
-        printf("%lu ", z[i]);
+    int local_instances = 64;
+    int threads = local_instances * 8;
+    int blocks = (n + threads - 1) / threads;
+    printf("threads = %d, blocks=%d\n", threads, blocks);
+    kernel_fp2Dbl_mulPreW<<<blocks, threads>>>(report, d_z, d_x, d_y, d_p, n);
+    cudaMemcpy(z.data(), d_z, n * 128, cudaMemcpyDeviceToHost);
+    //for(int i = 0; i < 16; i++){
+    //    printf("%lu ", z[i]);
+    //}
+    //printf("\n");
+    for(int i = 0; i < n; i++){
+        int cmp = memcmp(&z[i * 16], &all_z[i * 16], 16 * sizeof(uint64_t)); 
+        if(cmp != 0){
+            printf("first diff = %d \n", i);
+            break;
+        }
     }
-    printf("\n");
+    int cmp = memcmp(z.data(), all_z.data(), n * 128);
+    printf("cmp = %d\n", cmp);
 }
 
 inline __device__ void dev_mont_red(env_t& bn_env, 
@@ -293,17 +279,17 @@ inline __device__ void dev_mont_red(env_t& bn_env,
             cgbn_store(bn_env, buf + N_32 + 2, la);
         }
 
-        if(group_id == 0){
-            printf("buf4 = %lu, %lu\n", p64_buf[N_64], p64_buf[N_64*2]);
-        }
+        //if(group_id == 0){
+        //    printf("buf4 = %lu, %lu\n", p64_buf[N_64], p64_buf[N_64*2]);
+        //}
         uint64_t *c = p64_buf + 1;
         for(int i = 1; i < 4; i++){
             q = c[0] * rp;
-            if(group_id == 0){
-                for(int j = 0; j < 4; j++)
-                    printf("%lu ", c[j]);
-                printf("%lu \n", p64_buf[N_64*2]);
-            }
+            //if(group_id == 0){
+            //    for(int j = 0; j < 4; j++)
+            //        printf("%lu ", c[j]);
+            //    printf("%lu \n", p64_buf[N_64*2]);
+            //}
             //pq = p*q
             cgbn_mul_ui64(bn_env, lwt, lp, q);
             cgbn_store(bn_env, pq, lwt._low);
@@ -319,50 +305,54 @@ inline __device__ void dev_mont_red(env_t& bn_env,
             //c[N] += pq[N]
             buf4 = carry + c[N_64] + *(uint64_t*)th;
             if(group_id == 0){
-                printf("%d, %lu, %lu\n", i, buf4, p64_pq[N_64]);
+                //printf("%d, %lu, %lu\n", i, buf4, p64_pq[N_64]);
                 c[N_64] = buf4;
             }
             if(buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64]){
                 env_t::cgbn_t la;
                 cgbn_load(bn_env, la, (uint32_t*)(c + N_64 + 1));     
                 cgbn_add_ui32(bn_env, la, la, 1); 
-                if(group_id == 0){
-                    printf("%lu %lu\n", c[N_64], c[N_64+1]);
-                }
+                //if(group_id == 0){
+                //    printf("%lu %lu\n", c[N_64], c[N_64+1]);
+                //}
                 if(group_id < N_32 - i * 2)
                     cgbn_store(bn_env, (uint32_t*)(c + N_64 + 1), la);
-                if(group_id == 0){
-                    printf("%lu %lu\n", c[N_64], c[N_64+1]);
-                }
+                //if(group_id == 0){
+                //    printf("%lu %lu\n", c[N_64], c[N_64+1]);
+                //}
             }
             c++;
         }
 
-        if(group_id == 0){
-            for(int i = 0; i<5; i++){
-                printf("%lu ", c[i]);
-            }
-            printf("\n");
-        }
+        //if(group_id == 0){
+        //    for(int i = 0; i<5; i++){
+        //        printf("%lu ", c[i]);
+        //    }
+        //    printf("\n");
+        //}
         cgbn_load(bn_env, lc, (uint32_t*)c);
         carry = cgbn_sub(bn_env, lz, lc, lp);
         if(c[N_64] == 0 && carry){
             cgbn_set(bn_env, lz, lc);
         }
 }
+template<int Instances>
 __global__ void kernel_mont_red(
     cgbn_error_report_t* report, 
-    uint32_t* z, uint32_t*xy, uint32_t* p, const uint64_t rp){
-  context_t bn_context(cgbn_report_monitor, report, 0);
+    uint32_t* z, uint32_t*xy, uint32_t* p, const uint64_t rp, const int n){
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int instance = tid / 8;
+    if(instance >= n) return;
+  context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
-  __shared__ uint32_t cache_buf[N_32*2+2], cache_pq[N_32 + 2];
+  __shared__ uint32_t cache_buf[Instances * (N_32*2+2)], cache_pq[Instances * (N_32 + 2)];
   env_t::cgbn_t lz, lp;
   env_t::cgbn_wide_t lxy;
   cgbn_load(bn_env, lp, p);
-  cgbn_load(bn_env, lxy._low, xy);
-  cgbn_load(bn_env, lxy._high, xy + 8);
+  cgbn_load(bn_env, lxy._low, xy + instance * 16);
+  cgbn_load(bn_env, lxy._high, xy + instance * 16 + 8);
   dev_mont_red(bn_env, lz, lxy, lp, p, cache_buf, cache_pq, rp);
-  cgbn_store(bn_env, z, lz);
+  cgbn_store(bn_env, z + instance * 8, lz);
 }
 
 void test_mont_red(){
@@ -373,90 +363,109 @@ void test_mont_red(){
     uint64_t xy[8] = {10429895110800583235, 5272122913542525819, 12740881035615201776, 14771886802373817387, 6537186679166961715, 10405311241031360291, 1234404491868396534, 222089625327330384};
     uint64_t p[4] = {4332616871279656263, 10917124144477883021, 13281191951274694749, 3486998266802970665};
     uint64_t rp = 9786893198990664585;
+    const int n =1600;
+    std::vector<uint64_t> all_xy(n*8);
+    for(int i = 0; i < n; i++){
+        //memcpy(&all_xy[i*8], xy, 8 * sizeof(uint64_t));
+        for(int j = 0; j < 8; j++){
+            all_xy[i * 8 + j] = i * 8 + j;
+        }
+    }
 
     uint64_t correct_z[4];
     {
-        //host
-        const int N = 4;
-        uint64_t pq[N+1];//N+1
-        uint64_t buf[N*2+1];//N*2+1
-        //copyC<N - 1>(buf + N + 1, xy + N + 1);
-        //memcpy(buf, xy, 64);
-        memcpy(buf + N + 1, xy + N + 1, (N-1) * sizeof(int64_t));
-        buf[N * 2] = 0;
-        uint64_t q = xy[0] * rp;
-        pq[N] = mpn_mul_1(pq, p, N, q);
-        uint64_t carry = mpn_add_n(buf, xy, pq, N);
-        uint64_t up = 0;
-        buf[N] = xy[N] + pq[N];
-        if(buf[N] < xy[N] && buf[N] < pq[N]){
-            up = 1;
-            buf[N * 2] = mpn_add_1(buf + N + 1, buf+N+1, N - 1, 1);
-        }
-        buf[N] += carry;
-        printf("buf[4]=%lu\n", buf[N]);
-		uint64_t *c = buf + 1;
-		for (size_t i = 1; i < N; i++) {
-			q = c[0] * rp;
-            for(int j = 0; j < 4; j++)
-                printf("%lu ", c[j]);
-            printf("\n");
+        clock_t start = clock();
+        for(int it = 0; it < n; it++){
+            //host
+            const int N = 4;
+            uint64_t pq[N+1];//N+1
+            uint64_t buf[N*2+1];//N*2+1
+            //copyC<N - 1>(buf + N + 1, xy + N + 1);
+            //memcpy(buf, xy, 64);
+            memcpy(buf + N + 1, xy + N + 1, (N-1) * sizeof(int64_t));
+            buf[N * 2] = 0;
+            uint64_t q = xy[0] * rp;
             pq[N] = mpn_mul_1(pq, p, N, q);
-            //uint64_t up = AddPre<N + 1, Tag>::f(c, c, pq);
-            uint64_t up = mpn_add_n(c, c, pq, N+1);
-            if(up){
-                //AddUnitPre<Tag>::f(c + N + 1, N - i, 1);
-                mpn_add_1(c+N+1, c+N+1, N-i, 1);
+            uint64_t carry = mpn_add_n(buf, xy, pq, N);
+            uint64_t up = 0;
+            buf[N] = xy[N] + pq[N];
+            if(buf[N] < xy[N] && buf[N] < pq[N]){
+                up = 1;
+                buf[N * 2] = mpn_add_1(buf + N + 1, buf+N+1, N - 1, 1);
             }
-            //carry = mpn_add_n(c, c, pq, N);
-            //up = 0;
-            //c[N] += pq[N];
-            //printf("%d, %lu %lu\n", (int)i, c[N], pq[N]);
-            //if(c[N] < pq[N]){
-            //    mpn_add_1(c+N+1, c+N+1, N-i, 1);
+            buf[N] += carry;
+            //printf("buf[4]=%lu\n", buf[N]);
+            uint64_t *c = buf + 1;
+            for (size_t i = 1; i < N; i++) {
+                q = c[0] * rp;
+                //for(int j = 0; j < 4; j++)
+                //    printf("%lu ", c[j]);
+                //printf("\n");
+                pq[N] = mpn_mul_1(pq, p, N, q);
+                //uint64_t up = AddPre<N + 1, Tag>::f(c, c, pq);
+                uint64_t up = mpn_add_n(c, c, pq, N+1);
+                if(up){
+                    //AddUnitPre<Tag>::f(c + N + 1, N - i, 1);
+                    mpn_add_1(c+N+1, c+N+1, N-i, 1);
+                }
+                //carry = mpn_add_n(c, c, pq, N);
+                //up = 0;
+                //c[N] += pq[N];
+                //printf("%d, %lu %lu\n", (int)i, c[N], pq[N]);
+                //if(c[N] < pq[N]){
+                //    mpn_add_1(c+N+1, c+N+1, N-i, 1);
+                //}
+                //c[N] += carry;
+                c++;
+            }
+            //uint ret = SubPre<N, Tag>::f(z, c, p);
+            //for(int i = 0; i<5; i++){
+            //    printf("%lu ", c[i]);
             //}
-            //c[N] += carry;
-			c++;
-		}
-		//uint ret = SubPre<N, Tag>::f(z, c, p);
-        for(int i = 0; i<5; i++){
-            printf("%lu ", c[i]);
-        }
-        printf("\n");
-        //uint64_t ret = mpn_sub_n(correct_z, c, p, N);
-        //if(c[N] <= 0){
-		//	memcpy(correct_z, c, N * sizeof(uint64_t));
-		//}
-        if(c[N]){
-            mpn_sub_n(correct_z, c, p, N);
-        }else{
-            if(mpn_sub_n(correct_z, c, p, N)){
-                memcpy(correct_z, c, N * sizeof(uint64_t));
+            //printf("\n");
+            //uint64_t ret = mpn_sub_n(correct_z, c, p, N);
+            //if(c[N] <= 0){
+            //	memcpy(correct_z, c, N * sizeof(uint64_t));
+            //}
+            if(c[N]){
+                mpn_sub_n(correct_z, c, p, N);
+            }else{
+                if(mpn_sub_n(correct_z, c, p, N)){
+                    memcpy(correct_z, c, N * sizeof(uint64_t));
+                }
             }
         }
-        printf("end host\n");
+        //printf("end host\n");
+        clock_t end = clock();
+        printf("cpu time=%fus\n", 1000*1000*(double)(end-start)/CLOCKS_PER_SEC);
     }
 
     uint32_t *d_xy, *d_z, *d_p;
-    cudaMalloc((void**)&d_xy, 64);
+    cudaMalloc((void**)&d_xy, n*64);
     cudaMalloc((void**)&d_p, 32);
-    cudaMalloc((void**)&d_z, 32);
-    cudaMemcpy(d_xy, xy, 64, cudaMemcpyHostToDevice);
+    cudaMalloc((void**)&d_z, n*32);
+    cudaMemcpy(d_xy, all_xy.data(), n*64, cudaMemcpyHostToDevice);
     cudaMemcpy(d_p, p, 32, cudaMemcpyHostToDevice);
     cgbn_error_report_t* report = nullptr;
     cgbn_error_report_alloc(&report); 
-    kernel_mont_red<<<1, 8>>>(report, d_z, d_xy, d_p, rp);
-    uint64_t z[4];
-    cudaMemcpy(z, d_z, 32, cudaMemcpyDeviceToHost);
-    printf("\n");
-    for(int i = 0; i < 4; i++){
-        printf("%lu ", correct_z[i]);
-    }
-    printf("\n");
-    for(int i = 0; i < 4; i++){
-        printf("%lu ", z[i]);
-    }
-    printf("\n");
+    const int local_instances = 64;
+    int threads = local_instances * 8;
+    int blocks = (n + local_instances - 1) / local_instances;
+    //for(int it = 0; it < n; it++){
+        kernel_mont_red<local_instances><<<blocks, threads>>>(report, d_z, d_xy, d_p, rp, n);
+    //}
+    //uint64_t z[4];
+    std::vector<uint64_t> z(n * 4);
+    cudaMemcpy(z.data(), d_z, n*32, cudaMemcpyDeviceToHost);
+    //printf("\n");
+    //for(int i = 0; i < 4; i++){
+    //    printf("%lu ", correct_z[i]);
+    //}
+    //printf("\n");
+    //for(int i = 0; i < 4; i++){
+    //    printf("%lu ", z[i]);
+    //}
+    //printf("\n");
 }
 
 inline __device__ void dev_mcl_mul_g2(env_t& bn_env, MclFp2& z, MclFp2& x, MclFp2& y, env_t::cgbn_t& lp, uint32_t* p, uint32_t* buf, uint32_t *pq , const uint64_t rp){

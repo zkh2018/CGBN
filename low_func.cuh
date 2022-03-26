@@ -85,21 +85,6 @@ inline __device__ void dev_mcl_add(env_t& bn_env, uint32_t* z, uint32_t* x, uint
     cgbn_load(bn_env, lp, p);
     dev_mcl_add(bn_env, lz, lx, ly, lp, p, cache); 
     cgbn_store(bn_env, z, lz);
-    //cgbn_add(bn_env, d, a, b);
-    //cgbn_store(bn_env, z, d);
-    //int64_t a_z = ((uint64_t*)z)[3];
-    //int64_t b_p = ((uint64_t*)p)[3];
-    //if(a_z < b_p) return;
-    //if(a_z > b_p) {
-    //    cgbn_sub(bn_env, a, d, c);
-    //    cgbn_store(bn_env, z, a);
-    //    return;
-    //}
-    //
-    //int32_t borrow = cgbn_sub(bn_env, a, d, c);
-    //if(borrow == 0){
-    //    cgbn_store(bn_env, z, a);
-    //}
 }
 
 __global__ void kernel_mcl_add(
@@ -175,21 +160,22 @@ inline __device__ void dev_mcl_mul(env_t& bn_env,
     c[group_id] = 0;
 
     env_t::cgbn_t lc;
-    env_t::cgbn_wide_t lwc, lwt;
+    env_t::cgbn_wide_t lwt;
     //env_t::cgbn_t lcache;
     //cgbn_set_ui32(bn_env, lcache, t[0], t[1]);
     //cgbn_mul_wide(bn_env, lwc, lx, lcache);
-    cgbn_mul_ui64(bn_env, lwc, lx, p64_y[0]);
-    cgbn_store(bn_env, buf, lwc._low);
+    cgbn_mul_ui64(bn_env, lwt, lx, p64_y[0]);
+    cgbn_store(bn_env, buf, lwt._low);
+    cgbn_store(bn_env, buf + N_32, lwt._high);
+    cgbn_set(bn_env, lc, lwt._low);
     uint64_t q = c[0] * rp;
     //cgbn_set_ui32(bn_env, lcache, ((uint32_t*)&q)[0], ((uint32_t*)&q)[1]);
     //cgbn_mul_wide(bn_env, lwt2, lp, lcache);
     uint32_t th[2];
 
-    cgbn_mul_ui64(bn_env, lwt, lp, q);
-    q = cgbn_add(bn_env, lc, lwc._low, lwt._low);
+    cgbn_mul_ui64(bn_env, lwt, lp, c[0]*rp);
+    q = cgbn_add(bn_env, lc, lc, lwt._low);
     cgbn_store(bn_env, buf, lc);
-    cgbn_store(bn_env, buf + N_32, lwc._high);
     cgbn_get_ui64(bn_env, lwt._high, th, 0);
     if(group_id == 0){
         c[N_64] += *((uint64_t*)th) + q; 
@@ -1614,7 +1600,7 @@ inline __device__ void dev_mont_red(env_t& bn_env,
         uint32_t* p, uint32_t *buf, uint32_t *pq, const uint64_t rp){
         const int group_id = threadIdx.x & (TPI-1);
         uint64_t *p64_buf = (uint64_t*)buf;
-        uint64_t* p64_pq = (uint64_t*)pq;
+        //uint64_t* p64_pq = (uint64_t*)pq;
         p64_buf[group_id + 1] = 0;
 
         cgbn_store(bn_env, buf, lxy._low);
@@ -1622,80 +1608,71 @@ inline __device__ void dev_mont_red(env_t& bn_env,
         //if(group_id == 0){
         //    p64_buf[N_64*2] = 0;
         //}
-        uint32_t th[2];
+        //uint32_t th[2]; //,th2[2];
+        //uint64_t th2;
         env_t::cgbn_wide_t lwt;
-        cgbn_get_ui64(bn_env, lxy._low, th, 0);
+        //cgbn_get_ui64(bn_env, lxy._low, th, 0);
         //q = xy[0] * rp;
-        uint64_t q = *(uint64_t*)th * rp;
+        //uint64_t q = *(uint64_t*)th * rp;
         //pq = p * q
-        cgbn_mul_ui64(bn_env, lwt, lp, q);
-        cgbn_store(bn_env, pq, lwt._low);
-        cgbn_get_ui64(bn_env, lwt._high, th, 0);
+        cgbn_mul_ui64(bn_env, lwt, lp, p64_buf[0] * rp);
+        //cgbn_store(bn_env, pq, lwt._low);
+        cgbn_get_ui64(bn_env, lwt._high, pq, 0);
         //if(group_id == 0){
-            p64_pq[N_64] = *(uint64_t*)th;
+            //p64_pq[0] = *(uint64_t*)th;
         //}
-        env_t::cgbn_t lc;
+        //env_t::cgbn_t lc;
         //buf = pq + xy
-        uint32_t carry = cgbn_add(bn_env, lc, lxy._low, lwt._low);
-        cgbn_store(bn_env, buf, lc);
-        cgbn_get_ui64(bn_env, lxy._high, th, 0);
+        uint32_t carry = cgbn_add(bn_env, lwt._high, lxy._low, lwt._low);
+        cgbn_store(bn_env, buf, lwt._high);
+        //cgbn_get_ui64(bn_env, lxy._high, th, 0);
 
-        uint64_t buf4 = carry + *(uint64_t*)th + p64_pq[N_64];
+        uint64_t buf4 = carry + p64_buf[N_64] + *(uint64_t*)pq;//p64_pq[0];
         //if(group_id == 0){
             p64_buf[N_64] = buf4;
         //}
 
-        int flag = buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64];
-        env_t::cgbn_t la;
-        cgbn_load(bn_env, la, buf + N_32 + 2);     
-        cgbn_add_ui32(bn_env, la, la, flag); 
-        cgbn_store(bn_env, buf + N_32 + 2, la);
-        //if(buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64]){
-        //    env_t::cgbn_t la;
-        //    cgbn_load(bn_env, la, buf + N_32 + 2);     
-        //    cgbn_add_ui32(bn_env, la, la, 1); 
-        //    cgbn_store(bn_env, buf + N_32 + 2, la);
-        //}
+        int flag = buf4 < *(uint64_t*)pq || buf4 < carry || buf4 < p64_buf[N_64];//p64_pq[0];
+        //env_t::cgbn_t la;
+        cgbn_load(bn_env, lwt._low, buf + N_32 + 2);     
+        cgbn_add_ui32(bn_env, lwt._low, lwt._low, flag); 
+        cgbn_store(bn_env, buf + N_32 + 2, lwt._low);
 
-        uint64_t *c = p64_buf + 1;
+        //uint64_t *c = p64_buf + 1;
+        p64_buf++;
         for(int i = 1; i < 4; i++){
-            q = c[0] * rp;
+            //q = c[0] * rp;
             //pq = p*q
-            cgbn_mul_ui64(bn_env, lwt, lp, q);
-            cgbn_store(bn_env, pq, lwt._low);
-            cgbn_get_ui64(bn_env, lwt._high, th, 0);
+            cgbn_mul_ui64(bn_env, lwt, lp, p64_buf[0] * rp);
+            //cgbn_store(bn_env, pq, lwt._low);
+            cgbn_get_ui64(bn_env, lwt._high, pq, 0);
             //if(group_id == 0){
-                p64_pq[N_64] = *(uint64_t*)th;
+                //p64_pq[0] = *(uint64_t*)th;
             //}
-            cgbn_load(bn_env, lc, (uint32_t*)c);
+            cgbn_load(bn_env, lwt._high, (uint32_t*)p64_buf);
             //c = c + pq
-            carry = cgbn_add(bn_env, lc, lc, lwt._low);
-            cgbn_store(bn_env, (uint32_t*)c, lc);
+            carry = cgbn_add(bn_env, lwt._high, lwt._high, lwt._low);
+            cgbn_store(bn_env, (uint32_t*)p64_buf, lwt._high);
 
             //c[N] += pq[N]
-            buf4 = carry + c[N_64] + *(uint64_t*)th;
+            buf4 = carry + p64_buf[N_64] + *(uint64_t*)pq;
             //if(group_id == 0){
-                c[N_64] = buf4;
+                p64_buf[N_64] = buf4;
             //}
-            int flag = buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64];
-            env_t::cgbn_t la;
-            cgbn_load(bn_env, la, (uint32_t*)(c + N_64 + 1));     
-            cgbn_add_ui32(bn_env, la, la, flag); 
+            int flag = buf4 < *(uint64_t*)pq || buf4 < carry || buf4 < p64_buf[N_64];
+            //if(flag == 1){
+            //env_t::cgbn_t la;
+            cgbn_load(bn_env, lwt._low, (uint32_t*)(p64_buf + N_64 + 1));     
+            cgbn_add_ui32(bn_env, lwt._low, lwt._low, flag); 
             if(group_id < N_32 - i * 2)
-                cgbn_store(bn_env, (uint32_t*)(c + N_64 + 1), la);
-            //if(buf4 < *(uint64_t*)th || buf4 < carry || buf4 < p64_pq[N_64]){
-            //    env_t::cgbn_t la;
-            //    cgbn_load(bn_env, la, (uint32_t*)(c + N_64 + 1));     
-            //    cgbn_add_ui32(bn_env, la, la, 1); 
-            //    if(group_id < N_32 - i * 2)
-            //        cgbn_store(bn_env, (uint32_t*)(c + N_64 + 1), la);
+                cgbn_store(bn_env, (uint32_t*)(p64_buf + N_64 + 1), lwt._low);
             //}
-            c++;
+            p64_buf++;
         }
-        cgbn_load(bn_env, lc, (uint32_t*)c);
-        carry = cgbn_sub(bn_env, lz, lc, lp);
-        if(c[N_64] == 0 && carry){
-            cgbn_set(bn_env, lz, lc);
+        cgbn_load(bn_env, lwt._high, (uint32_t*)p64_buf);
+        carry = cgbn_sub(bn_env, lz, lwt._high, lp);
+        if(p64_buf[N_64] == 0 && carry){
+            cgbn_set(bn_env, lz, lwt._high);
         }
 }//    
 
@@ -1733,10 +1710,10 @@ inline __device__ uint32_t dev_sub_wide(env_t& bn_env, env_t::cgbn_wide_t& lz, e
     cgbn_sub(bn_env, lz._low, lx._low, ly._low);
     return cgbn_sub(bn_env, lz._high, lx._high, ly._high);
   }else{
-    env_t::cgbn_t max;
+    //env_t::cgbn_t max;
     env_t::cgbn_wide_t tmpz;
-    cgbn_set(bn_env, max, 0xffffffff);
-    cgbn_sub(bn_env, tmpz._low, max, ly._low);
+    cgbn_set(bn_env, tmpz._high, 0xffffffff);
+    cgbn_sub(bn_env, tmpz._low, tmpz._high, ly._low);
     cgbn_add(bn_env, tmpz._low, tmpz._low, lx._low);
     cgbn_add_ui32(bn_env, lz._low, tmpz._low, 1);
     cgbn_sub_ui32(bn_env, tmpz._high, lx._high, 1);
@@ -1774,13 +1751,16 @@ inline __device__ void dev_fp2Dbl_mulPreW(
     // const Fp& c = y.a;
     // const Fp& d = y.b;
     //FpDbl& d1 = z.b;
-    DevFp s, t;
+    //DevFp s, t;
     // Fp::addPre(s, a, b);
-    cgbn_add(bn_env, s.mont, x.c0.mont, x.c1.mont);  
+    //cgbn_add(bn_env, s.mont, x.c0.mont, x.c1.mont);  
+    cgbn_add(bn_env, z.a._low, x.c0.mont, x.c1.mont);  
     //Fp::addPre(t, c, d);
-    cgbn_add(bn_env, t.mont, y.c0.mont, y.c1.mont);  
+    //cgbn_add(bn_env, t.mont, y.c0.mont, y.c1.mont);  
+    cgbn_add(bn_env, z.a._high, y.c0.mont, y.c1.mont);  
     //FpDbl::mulPre(d1, s, t);
-    cgbn_mul_wide(bn_env, z.b, s.mont, t.mont); 
+    //cgbn_mul_wide(bn_env, z.b, s.mont, t.mont); 
+    cgbn_mul_wide(bn_env, z.b, z.a._low, z.a._high); 
 
     //FpDbl::mulPre(d0, a, c);
     cgbn_mul_wide(bn_env, z.a, x.c0.mont, y.c0.mont); 
@@ -1830,21 +1810,22 @@ inline __device__ void dev_mcl_sqr_g2(
         uint32_t* buf,
         uint32_t* t,
         const uint64_t rp){
-    DevFp t1, t2, t3;
+    //DevFp t3;
     // const Fp& a = x.a;
     // const Fp& b = x.b;
     // Fp::add(t1, b, b); // 2b
-    dev_mcl_add(bn_env, t1.mont, x.c1.mont, x.c1.mont, lp, p, buf); 
-    //t1 *= a; // 2ab
-    dev_mcl_mul(bn_env, t1.mont, t1.mont, x.c0.mont, lp, p, buf, t, rp); 
+    //dev_mcl_add(bn_env, t1.mont, x.c1.mont, x.c1.mont, lp, p, buf); 
     //Fp::add(t2, a, b); // a + b
-    dev_mcl_add(bn_env, t2.mont, x.c0.mont, x.c1.mont, lp, p, buf); 
+    dev_mcl_add(bn_env, y.c0.mont, x.c0.mont, x.c1.mont, lp, p, buf); 
     //Fp::sub(t3, a, b); // a - b
-    dev_mcl_sub(bn_env, t3.mont, x.c0.mont, x.c1.mont, lp);
+    dev_mcl_sub(bn_env, y.c1.mont, x.c0.mont, x.c1.mont, lp);
     //Fp::mul(y.a, t2, t3); // (a + b)(a - b)
-    dev_mcl_mul(bn_env, y.c0.mont, t2.mont, t3.mont, lp, p, buf, t, rp); 
+    dev_mcl_mul(bn_env, y.c0.mont, y.c0.mont, y.c1.mont, lp, p, buf, t, rp); 
     //y.b = t1;
-    cgbn_set(bn_env, y.c1.mont, t1.mont);
+    //cgbn_set(bn_env, y.c1.mont, t1.mont);
+    dev_mcl_add(bn_env, y.c1.mont, x.c1.mont, x.c1.mont, lp, p, buf); 
+    //t1 *= a; // 2ab
+    dev_mcl_mul(bn_env, y.c1.mont, y.c1.mont, x.c0.mont, lp, p, buf, t, rp); 
 }
 
 __global__ void kernel_sqr_g2(
@@ -2170,7 +2151,7 @@ inline __device__ void add_g2(env_t& bn_env, DevEct2& R, DevEct2& P, DevEct2& Q,
     bool isPzOne = P.z.is_one(bn_env, one.mont);//dev_is_one(bn_env, P.z.mont, one.mont);
     bool isQzOne = Q.z.is_one(bn_env, one.mont);//dev_is_one(bn_env, Q.z.mont, one.mont);
     //if(is_prefix_sum){
-    //    dev_addJacobi_NoPzAndNoQzOne_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
+    //  dev_addJacobi_NoPzAndNoQzOne_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
     //}else{
         dev_addJacobi_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
     //}
@@ -2415,7 +2396,7 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum(
   context_t bn_context(cgbn_report_monitor, report, offset + instance);
   env_t          bn_env(bn_context.env<env_t>());  
 
-  __shared__ uint32_t cache_buf[32*(N_32*2+2)], cache_t[32 * (N_32+2)];
+  __shared__ uint32_t cache_buf[32*(N_32*2+2)], cache_t[32 * (N_32)];
 
   MclFp lone, lp;
   MclFp2 la;
@@ -2431,7 +2412,7 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum(
     if(flags[j] == 1){
         DevEct2 dev_b;
         load(bn_env, dev_b, values, i);
-        add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32 + 2), la, mode_, rp);  
+        add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32 ), la, mode_, rp);  
     }
   }
   store(bn_env, partial, result, offset + instance);
@@ -2456,7 +2437,7 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_after(
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
 
-  __shared__ uint32_t cache_buf[32*(N_32*2+2)], cache_t[32 * (N_32+2)];
+  __shared__ uint32_t cache_buf[32*(N_32*2+2)], cache_t[32 * (N_32)];
 
   MclFp lone, lp;
   MclFp2 la;
@@ -2470,7 +2451,7 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_after(
   for(int i = half_n; i < n; i+= half_n){
 	  DevEct2 dev_b;
 	  load(bn_env, dev_b, partial, instance + i);
-      add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32 + 2), la, mode_, rp);  
+      add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32 ), la, mode_, rp);  
   }
   store(bn_env, partial, result, instance);
 }
@@ -2620,7 +2601,7 @@ __global__ void kernel_mcl_bucket_reduce_g2(
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
 
-  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32+2)];
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32)];
   int half_bucket_size = bucket_size / 2;
   int bucket_instance = bucket_tids[instance];
 
@@ -2636,7 +2617,7 @@ __global__ void kernel_mcl_bucket_reduce_g2(
   for(int i = bucket_instance + half_bucket_size; i < bucket_size; i+= half_bucket_size){
     DevEct2 other;
     load(bn_env, other, data, start + i);
-    add_g2(bn_env, result, result, other, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32+2), la, mode_, rp);  
+    add_g2(bn_env, result, result, other, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32), la, mode_, rp);  
   }
   store(bn_env, data, result, start + bucket_instance);
 }
@@ -2764,7 +2745,7 @@ __global__ void kernel_mcl_prefix_sum_pre_g2(
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
 
-  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32+2)];
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32)];
   MclFp lone, lp;
   MclFp2 la;
   load(bn_env, lone, one, 0); 
@@ -2778,7 +2759,7 @@ __global__ void kernel_mcl_prefix_sum_pre_g2(
       DevEct2 dev_a, dev_b;
       load(bn_env, dev_a, data, offset + index);
       load(bn_env, dev_b, data, offset + index - stride);
-      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32+2), la, mode_, rp, true);  
+      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32), la, mode_, rp, true);  
       store(bn_env, data, dev_a, offset + index);
     }
 }
@@ -2803,7 +2784,7 @@ __global__ void kernel_mcl_prefix_sum_post_g2(
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
 
-  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32+2)];
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32)];
   MclFp lone, lp;
   MclFp2 la;
   load(bn_env, lone, one, 0); 
@@ -2817,7 +2798,7 @@ __global__ void kernel_mcl_prefix_sum_post_g2(
       DevEct2 dev_a, dev_b;
       load(bn_env, dev_a, data, offset + index + stride);
       load(bn_env, dev_b, data, offset + index);
-      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32+2), la, mode_, rp, true);  
+      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32), la, mode_, rp, true);  
       store(bn_env, data, dev_a, offset + index + stride);
     }
   if(save_block_sum && local_instance == 0){
@@ -2847,7 +2828,7 @@ __global__ void kernel_mcl_prefix_sum_g2(
 
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
-    __shared__ uint32_t cache_buf[RealInstances*(N_32*2+2)], cache_t[RealInstances * (N_32+2)];
+    __shared__ uint32_t cache_buf[RealInstances*(N_32*2+2)], cache_t[RealInstances * (N_32)];
     MclFp lone, lp;
     MclFp2 la;
     load(bn_env, lone, one, 0); 
@@ -2863,7 +2844,7 @@ __global__ void kernel_mcl_prefix_sum_g2(
                         DevEct2 dev_a, dev_b;
                         load(bn_env, dev_a, data, offset + index);
                         load(bn_env, dev_b, data, offset + index - stride);
-                        add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32+2), la, mode_, rp, true);  
+                        add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32), la, mode_, rp, true);  
                         store(bn_env, data, dev_a, offset + index);
                     }
             __syncthreads();
@@ -2875,7 +2856,7 @@ __global__ void kernel_mcl_prefix_sum_g2(
                         DevEct2 dev_a, dev_b;
                         load(bn_env, dev_a, data, offset + index + stride);
                         load(bn_env, dev_b, data, offset + index);
-                        add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32+2), la, mode_, rp, true);  
+                        add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32), la, mode_, rp, true);  
                         store(bn_env, data, dev_a, offset + index + stride);
                     }
         }
@@ -2906,7 +2887,7 @@ __global__ void kernel_mcl_add_block_sum_g2(
   if(instances + instance >= n) return;
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
-  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32 + 2)];
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32 )];
   MclFp lone, lp;
   MclFp2 la;
   load(bn_env, lone, one, 0); 
@@ -2917,7 +2898,7 @@ __global__ void kernel_mcl_add_block_sum_g2(
   DevEct2 dev_block_sum, dev_a;
   load(bn_env, dev_block_sum, block_sums, blockIdx.x);
   load(bn_env, dev_a, data, instance + instances);//offset = instances
-  add_g2(bn_env, dev_a, dev_a, dev_block_sum, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32+2), la, mode_, rp);  
+  add_g2(bn_env, dev_a, dev_a, dev_block_sum, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32), la, mode_, rp);  
   store(bn_env, data, dev_a, instance + instances);
 }
 
@@ -2988,7 +2969,7 @@ __global__ void kernel_mcl_reduce_sum_g2(
   int local_instance = threadIdx.x / TPI;
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
-  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32+2)];
+  __shared__ uint32_t cache_buf[BlockInstances*(N_32*2+2)], cache_t[BlockInstances * (N_32)];
   MclFp lone, lp;
   MclFp2 la;
   load(bn_env, lone, one, 0); 
@@ -3001,7 +2982,7 @@ __global__ void kernel_mcl_reduce_sum_g2(
   for(int i = instance + half_n; i < n; i+= half_n){
       DevEct2 dev_b;
       load(bn_env, dev_b, data, i);
-      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32+2), la, mode_, rp);  
+      add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + local_instance * (N_32 * 2 + 2), cache_t + local_instance * (N_32), la, mode_, rp);  
     }
   store(bn_env, out, dev_a, instance);
 }
