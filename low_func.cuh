@@ -1632,8 +1632,26 @@ __device__ __forceinline__ void dev_mont_red(env_t& bn_env,
         for(int i = 1; i < 4; i++){
             //q = c[0] * rp;
             //pq = p*q
-            cgbn_mul_ui64(bn_env, lwt, lp, p64_buf[0] * rp);
-            cgbn_get_ui64(bn_env, lwt._high, pq, 0);
+            //cgbn_mul_ui64(bn_env, lwt, lp, p64_buf[0] * rp);
+            //cgbn_get_ui64(bn_env, lwt._high, pq, 0);
+            /**mul_ui64*/
+            uint64_t tmp = p64_buf[0] * rp;
+            uint32_t tmp2 = cgbn_mul_ui32(bn_env, lwt._high, lp, ((uint32_t*)&tmp)[0]); 
+            uint32_t tmp1 = cgbn_mul_ui32(bn_env, lwt._low, lp, ((uint32_t*)&tmp)[1]); 
+            uint32_t carry = cgbn_get_ui32(bn_env, lwt._high, 0);
+            cgbn_shift_right(bn_env, lwt._high, lwt._high, 32);
+            //uint32_t tmp3 = 
+            cgbn_add(bn_env, lwt._low, lwt._low, lwt._high);
+            tmp = cgbn_get_ui32(bn_env, lwt._low, 7);
+            cgbn_shift_left(bn_env, lwt._low, lwt._low, 32); 
+            cgbn_add_ui32(bn_env, lwt._low, lwt._low, carry);
+            uint64_t tmp4 = (uint64_t)tmp + tmp2;
+            uint32_t tmp5 = (uint32_t)tmp4;
+            tmp1 += (tmp5 != tmp4 ? 1 : 0);
+            pq[0] = tmp5;
+            pq[1] = tmp1;
+            /**mul_ui64*/
+
             cgbn_load(bn_env, lwt._high, (uint32_t*)p64_buf);
             //c = c + pq
             carry = cgbn_add(bn_env, lwt._high, lwt._high, lwt._low);
@@ -1970,18 +1988,18 @@ struct DevEct2 {
 
 inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(env_t& bn_env, DevEct2& R, DevEct2& P, DevEct2& Q, bool isPzOne, bool isQzOne,
         MclFp& one, MclFp& p, const int specialA_, uint32_t* cache_buf, uint32_t* cache_t, MclFp2& a_, const int mode_, const uint64_t rp){
-    MclFp2 H, r, U1, H3, S1;
+    MclFp2 r, U1, H3, S1;
     dev_mcl_sqr_g2(bn_env, r, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sqr_g2(bn_env, S1, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, U1, P.x, S1, p.mont, p.ptr, cache_buf, cache_t, rp);
-    dev_mcl_mul_g2(bn_env, H, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
-    dev_mcl_sub_g2(bn_env, H, H, U1, p.mont);
+    dev_mcl_mul_g2(bn_env, R.x, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
+    dev_mcl_sub_g2(bn_env, R.x, R.x, U1, p.mont);
     dev_mcl_mul_g2(bn_env, S1, S1, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, S1, S1, P.y, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, r, r, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, r, r, Q.y, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sub_g2(bn_env, r, r, S1, p.mont);
-    if (H.is_zero(bn_env)) {
+    if (R.x.is_zero(bn_env)) {
         if (r.is_zero(bn_env)) {
             R.dev_dblNoVerifyInfJacobi(bn_env, P, one, p, specialA_, cache_buf, cache_t, a_, rp);
         } else {
@@ -1990,11 +2008,11 @@ inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(env_t& bn_env, DevEct2& R
         return;
     }
     dev_mcl_mul_g2(bn_env, R.z, P.z, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
-    dev_mcl_mul_g2(bn_env, R.z, R.z, H, p.mont, p.ptr, cache_buf, cache_t, rp);
-    dev_mcl_sqr_g2(bn_env, H3, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+    dev_mcl_mul_g2(bn_env, R.z, R.z, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
+    dev_mcl_sqr_g2(bn_env, H3, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sqr_g2(bn_env, R.y, r, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, U1, U1, H3, p.mont, p.ptr, cache_buf, cache_t, rp);
-    dev_mcl_mul_g2(bn_env, H3, H3, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+    dev_mcl_mul_g2(bn_env, H3, H3, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sub_g2(bn_env, R.y, R.y, U1, p.mont);
     dev_mcl_sub_g2(bn_env, R.y, R.y, U1, p.mont);
     dev_mcl_sub_g2(bn_env, R.x, R.y, H3, p.mont);
@@ -2007,7 +2025,7 @@ inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(env_t& bn_env, DevEct2& R
 
 inline __device__ void dev_addJacobi_g2(env_t& bn_env, DevEct2& R, DevEct2& P, DevEct2& Q, bool isPzOne, bool isQzOne,
         MclFp& one, MclFp& p, const int specialA_, uint32_t* cache_buf, uint32_t* cache_t, MclFp2& a_, const int mode_, const uint64_t rp){
-    MclFp2 r, U1, S1, H, H3;
+    MclFp2 r, U1, S1, H3;
     if (isPzOne) {
         // r = 1;
     } else {
@@ -2021,13 +2039,13 @@ inline __device__ void dev_addJacobi_g2(env_t& bn_env, DevEct2& R, DevEct2& P, D
         if (isPzOne) {
             //H = Q.x;
             //H.set(bn_env, Q.x);
-            H.copy_from(bn_env, Q.x);
+            R.x.copy_from(bn_env, Q.x);
         } else {
             //Fp::mul(H, Q.x, r);
-            dev_mcl_mul_g2(bn_env, H, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
+            dev_mcl_mul_g2(bn_env, R.x, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
         }
         //H -= U1;
-        dev_mcl_sub_g2(bn_env, H, H, U1, p.mont);
+        dev_mcl_sub_g2(bn_env, R.x, R.x, U1, p.mont);
         //S1 = P.y;
         //S1.set(bn_env, P.y);
         S1.copy_from(bn_env, P.y);
@@ -2039,13 +2057,13 @@ inline __device__ void dev_addJacobi_g2(env_t& bn_env, DevEct2& R, DevEct2& P, D
         if (isPzOne) {
             //H = Q.x;
             //H.set(bn_env, Q.x);
-            H.copy_from(bn_env, Q.x);
+            R.x.copy_from(bn_env, Q.x);
         } else {
             //Fp::mul(H, Q.x, r);
-            dev_mcl_mul_g2(bn_env, H, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
+            dev_mcl_mul_g2(bn_env, R.x, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
         }
         //H -= U1;
-        dev_mcl_sub_g2(bn_env, H, H, U1, p.mont);
+        dev_mcl_sub_g2(bn_env, R.x, R.x, U1, p.mont);
         //S1 *= Q.z;
         dev_mcl_mul_g2(bn_env, S1, S1, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
         //S1 *= P.y;
@@ -2063,7 +2081,7 @@ inline __device__ void dev_addJacobi_g2(env_t& bn_env, DevEct2& R, DevEct2& P, D
     }
     //r -= S1;
     dev_mcl_sub_g2(bn_env, r, r, S1, p.mont);
-    if (H.is_zero(bn_env)) {
+    if (R.x.is_zero(bn_env)) {
         if (r.is_zero(bn_env)) {
             R.dev_dblNoVerifyInfJacobi(bn_env, P, one, p, specialA_, cache_buf, cache_t, a_, rp);
         } else {
@@ -2075,30 +2093,30 @@ inline __device__ void dev_addJacobi_g2(env_t& bn_env, DevEct2& R, DevEct2& P, D
         if (isQzOne) {
             //R.z = H;
             //R.z.set(bn_env, H);
-            R.z.copy_from(bn_env, H);
+            R.z.copy_from(bn_env, R.x);
         } else {
             //Fp::mul(R.z, H, Q.z);
-            dev_mcl_mul_g2(bn_env, R.z, H, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+            dev_mcl_mul_g2(bn_env, R.z, R.x, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
         }
     } else {
         if (isQzOne) {
             //Fp::mul(R.z, P.z, H);
-            dev_mcl_mul_g2(bn_env, R.z, P.z, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+            dev_mcl_mul_g2(bn_env, R.z, P.z, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
         } else {
             //Fp::mul(R.z, P.z, Q.z);
             dev_mcl_mul_g2(bn_env, R.z, P.z, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
             //R.z *= H;
-            dev_mcl_mul_g2(bn_env, R.z, R.z, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+            dev_mcl_mul_g2(bn_env, R.z, R.z, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
         }
     }
     //Fp::sqr(H3, H); // H^2
-    dev_mcl_sqr_g2(bn_env, H3, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+    dev_mcl_sqr_g2(bn_env, H3, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
     //Fp::sqr(R.y, r); // r^2
     dev_mcl_sqr_g2(bn_env, R.y, r, p.mont, p.ptr, cache_buf, cache_t, rp);
     ///U1 *= H3; // U1 H^2
     dev_mcl_mul_g2(bn_env, U1, U1, H3, p.mont, p.ptr, cache_buf, cache_t, rp);
     //H3 *= H; // H^3
-    dev_mcl_mul_g2(bn_env, H3, H3, H, p.mont, p.ptr, cache_buf, cache_t, rp);
+    dev_mcl_mul_g2(bn_env, H3, H3, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
     //R.y -= U1;
     dev_mcl_sub_g2(bn_env, R.y, R.y, U1, p.mont);
     //R.y -= U1;
@@ -2133,7 +2151,7 @@ inline __device__ void add_g2(env_t& bn_env, DevEct2& R, DevEct2& P, DevEct2& Q,
     bool isPzOne = P.z.is_one(bn_env, one.mont);//dev_is_one(bn_env, P.z.mont, one.mont);
     bool isQzOne = Q.z.is_one(bn_env, one.mont);//dev_is_one(bn_env, Q.z.mont, one.mont);
     //if(is_prefix_sum){
-    //  dev_addJacobi_NoPzAndNoQzOne_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
+    ///dev_addJacobi_NoPzAndNoQzOne_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
     //}else{
         dev_addJacobi_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
     //}
