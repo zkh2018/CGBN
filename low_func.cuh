@@ -900,7 +900,7 @@ int mcl_bn128_g1_reduce_sum(
   kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
 
   int n = max_reduce_depth;
-  const int local_instances2 = 32;
+  const int local_instances2 = 64;
   threads = local_instances2 * TPI;
   uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
   dim3 blocks2(block_x2, ranges_size, 1);
@@ -1209,7 +1209,7 @@ void mcl_bucket_reduce_sum(
       CUDA_CHECK(cudaMemcpyAsync(&total_instances, half_sizes + bucket_num-1, sizeof(int), cudaMemcpyDeviceToHost, stream)); 
       sync(stream); 
       if(total_instances == 0) break;
-      const int local_instances = 32;
+      const int local_instances = 64;
       threads = local_instances * TPI;
       blocks = (total_instances + local_instances - 1) / local_instances;
       kernel_mcl_bucket_reduce_g1<local_instances><<<blocks, threads, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
@@ -1520,7 +1520,7 @@ void mcl_bn128_g1_reduce_sum2(
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
   int len = n-1;
-  const int instances = 32;
+  const int instances = 64;
   int threads = instances * TPI;
   int half_len = (len + 1) / 2;
   int blocks = (half_len + instances - 1) / instances;
@@ -2685,7 +2685,7 @@ void mcl_bucket_reduce_sum_g2(
     CUDA_CHECK(cudaMemcpyAsync(&total_instances, half_sizes + bucket_num-1, sizeof(int), cudaMemcpyDeviceToHost, stream)); 
     sync(stream); 
     if(total_instances == 0) break;
-    const int local_instances = 32;
+    const int local_instances = 64;
     threads = local_instances * TPI;
     blocks = (total_instances + local_instances - 1) / local_instances;
     kernel_mcl_bucket_reduce_g2<local_instances><<<blocks, threads, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
@@ -3000,7 +3000,7 @@ void mcl_bn128_g2_reduce_sum2(
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
   int len = n-1;
-  const int instances = 32;
+  const int instances = 64;
   int threads = instances * TPI;
   int half_len = (len + 1) / 2;
   int blocks = (half_len + instances - 1) / instances;
