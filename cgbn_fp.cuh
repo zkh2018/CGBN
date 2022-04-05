@@ -17,7 +17,7 @@ typedef cgbn_context_t<TPI> context_t;
 typedef cgbn_env_t<context_t, BITS> env_t;
 #define max_threads_per_block  (512/TPI)
 
-inline __device__ void device_fp_add(env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
+inline __device__ void device_fp_add(const env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
   env_t::cgbn_t tin1, tin2, tmodule_data, tscratch;
 
   cgbn_load(bn_env, tin1, in1);
@@ -40,7 +40,7 @@ inline __device__ void device_fp_add(env_t& bn_env, cgbn_mem_t<BITS>* const in1,
     cgbn_store(bn_env, in1, tscratch);
   }
 }
-inline __device__ void device_fp_add(env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, const env_t::cgbn_t& tmax_value){
+inline __device__ void device_fp_add(const env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, const env_t::cgbn_t& tmax_value){
   env_t::cgbn_t tin1, tin2, tmodule_data, tscratch;
 
   cgbn_load(bn_env, tin1, in1);
@@ -62,7 +62,7 @@ inline __device__ void device_fp_add(env_t& bn_env, cgbn_mem_t<BITS>* const in1,
   }
 }
 
-inline __device__ void device_fp_add(env_t& bn_env, env_t::cgbn_t& tout, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, cgbn_mem_t<BITS>* module_data, const env_t::cgbn_t& tmax_value){
+inline __device__ void device_fp_add(const env_t& bn_env, env_t::cgbn_t& tout, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, cgbn_mem_t<BITS>* module_data, const env_t::cgbn_t& tmax_value){
   env_t::cgbn_t tmodule_data, tscratch;
 
   cgbn_load(bn_env, tmodule_data, module_data);
@@ -83,7 +83,7 @@ inline __device__ void device_fp_add(env_t& bn_env, env_t::cgbn_t& tout, const e
   }
 }
 
-inline __device__ void device_fp_add(env_t& bn_env, env_t::cgbn_t& tout, cgbn_mem_t<BITS>* const in1, const env_t::cgbn_t& tin2, cgbn_mem_t<BITS>* module_data, const env_t::cgbn_t& tmax_value){
+inline __device__ void device_fp_add(const env_t& bn_env, env_t::cgbn_t& tout, cgbn_mem_t<BITS>* const in1, const env_t::cgbn_t& tin2, cgbn_mem_t<BITS>* module_data, const env_t::cgbn_t& tmax_value){
   env_t::cgbn_t tin1, tmodule_data, tscratch, tmp;
 
   cgbn_load(bn_env, tin1, in1);
@@ -103,7 +103,7 @@ inline __device__ void device_fp_add(env_t& bn_env, env_t::cgbn_t& tout, cgbn_me
   }
 }
 
-inline __device__ void device_fp_add(env_t& bn_env, env_t::cgbn_t& tout, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, const env_t::cgbn_t& tmodule_data, const env_t::cgbn_t& tmax_value){
+inline __device__ void device_fp_add(const env_t& bn_env, env_t::cgbn_t& tout, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, const env_t::cgbn_t& tmodule_data, const env_t::cgbn_t& tmax_value){
   env_t::cgbn_t tscratch;
 
   uint32_t carry = cgbn_add(bn_env, tscratch, tin1, tin2);
@@ -121,7 +121,7 @@ inline __device__ void device_fp_add(env_t& bn_env, env_t::cgbn_t& tout, const e
   }
 }
 
-inline __device__ void device_fp_sub(env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
+inline __device__ void device_fp_sub(const env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
   env_t::cgbn_t tin1, tin2, tmodule_data, tscratch;
   cgbn_load(bn_env, tin1, in1);
   cgbn_load(bn_env, tin2, in2);
@@ -145,7 +145,7 @@ inline __device__ void device_fp_sub(env_t& bn_env, cgbn_mem_t<BITS>* const in1,
   }
 }
 
-inline __device__ void device_fp_sub(env_t& bn_env, env_t::cgbn_t& tout, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, cgbn_mem_t<BITS>* module_data, const env_t::cgbn_t& tmax_value){
+inline __device__ void device_fp_sub(const env_t& bn_env, env_t::cgbn_t& tout, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, cgbn_mem_t<BITS>* module_data, const env_t::cgbn_t& tmax_value){
   env_t::cgbn_t tmodule_data, tscratch;
   cgbn_load(bn_env, tmodule_data, module_data);
 
@@ -164,7 +164,7 @@ inline __device__ void device_fp_sub(env_t& bn_env, env_t::cgbn_t& tout, const e
   }
 }
 
-inline __device__ void device_fp_sub(env_t& bn_env, env_t::cgbn_t& tout, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, const env_t::cgbn_t& tmodule_data, const env_t::cgbn_t& tmax_value){
+inline __device__ void device_fp_sub(const env_t& bn_env, env_t::cgbn_t& tout, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, const env_t::cgbn_t& tmodule_data, const env_t::cgbn_t& tmax_value){
   env_t::cgbn_t tscratch;
 
   if(cgbn_compare(bn_env, tin1, tin2) < 0){

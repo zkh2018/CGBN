@@ -65,12 +65,12 @@ struct DevFp2{
     return (c0.isequal(bn_env, other.c0) && c1.isequal(bn_env, other.c1));
   }
 
-  inline __device__ void copy_from(env_t& bn_env, const DevFp2& other){
+  inline __device__ void copy_from(const env_t& bn_env, const DevFp2& other){
     c0.copy_from(bn_env, other.c0);
     c1.copy_from(bn_env, other.c1);
   }
 
-  inline __device__ void set_zero(env_t& bn_env){
+  inline __device__ void set_zero(const env_t& bn_env){
     c0.set_zero(bn_env);
     c1.set_zero(bn_env);
   }

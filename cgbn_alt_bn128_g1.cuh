@@ -8,47 +8,47 @@ namespace gpu{
 struct DevFp{
   env_t::cgbn_t mont;//, modulus;
   //uint64_t inv;
-  inline __device__ DevFp zero(env_t& bn_env){
+  inline __device__ DevFp zero(const env_t& bn_env){
     DevFp zero;
     cgbn_set_ui32(bn_env, zero.mont, 0);
     return zero;
   }
 
-  inline __device__ void set_zero(env_t& bn_env){
+  inline __device__ void set_zero(const env_t& bn_env){
     cgbn_set_ui32(bn_env, mont, 0);
   }
-  inline __device__ void set_one(env_t& bn_env){
+  inline __device__ void set_one(const env_t& bn_env){
     cgbn_set_ui32(bn_env, mont, 1);
   }
-  inline __device__ void set_ui32(env_t& bn_env, const uint32_t value){
+  inline __device__ void set_ui32(const env_t& bn_env, const uint32_t value){
     cgbn_set_ui32(bn_env, mont,value);
   }
 
-  inline __device__ void set(env_t& bn_env, const DevFp& other){
+  inline __device__ void set(const env_t& bn_env, const DevFp& other){
     //inv = other.inv;
     cgbn_set(bn_env, mont, other.mont);
     //cgbn_set(bn_env, modulus, other.modulus);
   }
-  inline __device__ void copy_from(env_t& bn_env, const DevFp& other){
+  inline __device__ void copy_from(const env_t& bn_env, const DevFp& other){
     //inv = other.inv;
     cgbn_set(bn_env, mont, other.mont);
     //cgbn_set(bn_env, modulus, other.modulus);
   }
-  inline __device__ bool is_zero(env_t& bn_env) const {
+  inline __device__ bool is_zero(const env_t& bn_env) const {
     return cgbn_equals_ui32(bn_env, mont, 0);
   }
-  inline __device__ bool isequal(env_t& bn_env, const DevFp& other) const {
+  inline __device__ bool isequal(const env_t& bn_env, const DevFp& other) const {
     return cgbn_equals(bn_env, mont, other.mont);
   }
 
-  inline __device__ DevFp squared(env_t& bn_env, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
+  inline __device__ DevFp squared(const env_t& bn_env, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
     device_mul_reduce(bn_env, res, mont, mont, modulus, tmp_buffer, inv);
     DevFp ret;
     cgbn_load(bn_env, ret.mont, res + 8);
     return ret;
   }
 
-  inline __device__ DevFp mul(env_t& bn_env, const DevFp& other, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
+  inline __device__ DevFp mul(const env_t& bn_env, const DevFp& other, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
     device_mul_reduce(bn_env, res, mont, other.mont, modulus, tmp_buffer, inv);
     DevFp ret;
     cgbn_load(bn_env, ret.mont, res + 8);
@@ -56,19 +56,19 @@ struct DevFp{
 
   }
 
-  inline __device__ DevFp sub(env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
+  inline __device__ DevFp sub(const env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
     DevFp ret;
     device_fp_sub(bn_env, ret.mont, mont, other.mont, modulus, max_value);
     return ret;
   }
 
-  inline __device__ DevFp add(env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
+  inline __device__ DevFp add(const env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
     DevFp ret;
     device_fp_add(bn_env, ret.mont, mont, other.mont, modulus, max_value);
     return ret;
   }
 
-  inline __device__ DevFp negative(env_t& bn_env, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
+  inline __device__ DevFp negative(const env_t& bn_env, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
     if(is_zero(bn_env)) return *this;
 
     DevFp ret;
@@ -76,20 +76,20 @@ struct DevFp{
     return ret;
   }
 
-  inline __device__ void load(env_t& bn_env, const Fp_model& a, const int offset){
+  inline __device__ void load(const env_t& bn_env, const Fp_model& a, const int offset){
     cgbn_load(bn_env, mont, a.mont_repr_data + offset);
   }
-  inline __device__ void store(env_t& bn_env, cgbn_mem_t<BITS>* a, const int offset){
+  inline __device__ void store(const env_t& bn_env, cgbn_mem_t<BITS>* a, const int offset){
     cgbn_store(bn_env, a + offset, mont);
   }
-  inline __device__ DevFp as_bigint(env_t& bn_env, uint32_t *res, uint32_t* buffer, const env_t::cgbn_t& modulus, const uint64_t inv){
+  inline __device__ DevFp as_bigint(const env_t& bn_env, uint32_t *res, uint32_t* buffer, const env_t::cgbn_t& modulus, const uint64_t inv){
     DevFp one;
     one.set_zero(bn_env);
     one.set_one(bn_env);
     return this->mul(bn_env, one, res, buffer, modulus, inv);
   }
 
-  inline __device__ void print_array(env_t& bn_env, env_t::cgbn_t& data, uint32_t* buffer){
+  inline __device__ void print_array(const env_t& bn_env, env_t::cgbn_t& data, uint32_t* buffer){
     cgbn_store(bn_env, buffer, data);
     int group_tid = threadIdx.x % TPI;
     if(group_tid == 0){
@@ -99,7 +99,7 @@ struct DevFp{
       printf("\n");
     }
   }
-  inline __device__ void print_array_64(env_t& bn_env, env_t::cgbn_t& data, uint32_t* buffer){
+  inline __device__ void print_array_64(const env_t& bn_env, env_t::cgbn_t& data, uint32_t* buffer){
     cgbn_store(bn_env, buffer, data);
     int group_tid = threadIdx.x % TPI;
     if(group_tid == 0){
@@ -110,12 +110,12 @@ struct DevFp{
       printf("\n");
     }
   }
-  inline __device__ void print(env_t& bn_env, uint32_t* buffer){
+  inline __device__ void print(const env_t& bn_env, uint32_t* buffer){
     int group_tid = threadIdx.x % TPI;
     if(group_tid == 0)
     print_array(bn_env, mont, buffer);
   }
-  inline __device__ void print_64(env_t& bn_env, uint32_t* buffer){
+  inline __device__ void print_64(const env_t& bn_env, uint32_t* buffer){
     int group_tid = threadIdx.x % TPI;
     if(group_tid == 0)
     print_array_64(bn_env, mont, buffer);
@@ -126,7 +126,7 @@ struct DevFp{
 struct DevAltBn128G1{
   DevFp x, y, z;
 
-  inline __device__ void load(env_t& bn_env, alt_bn128_g1& a, const int offset){
+  inline __device__ void load(const env_t& bn_env, alt_bn128_g1& a, const int offset){
     cgbn_load(bn_env, x.mont, a.x.mont_repr_data + offset);
     //cgbn_load(bn_env, x.modulus, a.x.modulus_data + offset);
     //x.inv = a.x.inv;
@@ -139,7 +139,7 @@ struct DevAltBn128G1{
     //cgbn_load(bn_env, z.modulus, a.z.modulus_data + offset);
     //z.inv = a.z.inv;
   }
-  inline __device__ void store(env_t& bn_env, alt_bn128_g1& a, const int offset){
+  inline __device__ void store(const env_t& bn_env, alt_bn128_g1& a, const int offset){
     cgbn_store(bn_env, a.x.mont_repr_data + offset, x.mont);
     //cgbn_store(bn_env, a.x.modulus_data + offset, x.modulus);
     //a.x.inv = x.inv;
@@ -152,7 +152,7 @@ struct DevAltBn128G1{
     //cgbn_store(bn_env, a.z.modulus_data + offset, z.modulus);
     //a.z.inv = z.inv;
   }
-  inline __device__ void store(env_t& bn_env, DevFp& x_, DevFp& y_, DevFp& z_, alt_bn128_g1& a, const int offset){
+  inline __device__ void store(const env_t& bn_env, DevFp& x_, DevFp& y_, DevFp& z_, alt_bn128_g1& a, const int offset){
     cgbn_store(bn_env, a.x.mont_repr_data + offset, x_.mont);
     //cgbn_store(bn_env, a.x.modulus_data + offset, x_.modulus);
     //a.x.inv = x_.inv;
@@ -166,10 +166,10 @@ struct DevAltBn128G1{
     //a.z.inv = z_.inv;
   }
 
-  inline __device__ bool is_zero(env_t& bn_env) const {
+  inline __device__ bool is_zero(const env_t& bn_env) const {
     return z.is_zero(bn_env);
   }
-  inline __device__ bool is_equal(env_t& bn_env, DevAltBn128G1& other, uint32_t* res, uint32_t* buffer, const env_t::cgbn_t& modulus, const uint64_t inv ) const {
+  inline __device__ bool is_equal(const env_t& bn_env, DevAltBn128G1& other, uint32_t* res, uint32_t* buffer, const env_t::cgbn_t& modulus, const uint64_t inv ) const {
     if(this->is_zero(bn_env)){
       return other.is_zero(bn_env);
     }
@@ -194,23 +194,23 @@ struct DevAltBn128G1{
     return true;
   }
 
-  inline __device__ void set(env_t& bn_env, const DevFp& x_, const DevFp& y_, const DevFp& z_){
+  inline __device__ void set(const env_t& bn_env, const DevFp& x_, const DevFp& y_, const DevFp& z_){
     x.copy_from(bn_env, x_);
     y.copy_from(bn_env, y_);
     z.copy_from(bn_env, z_);
   }
-  inline __device__ void copy_from(env_t& bn_env, const DevAltBn128G1& other){
+  inline __device__ void copy_from(const env_t& bn_env, const DevAltBn128G1& other){
     x.copy_from(bn_env, other.x);
     y.copy_from(bn_env, other.y);
     z.copy_from(bn_env, other.z);
   }
-  inline __device__ void set_zero(env_t& bn_env){
+  inline __device__ void set_zero(const env_t& bn_env){
     x.set_zero(bn_env);
     y.set_one(bn_env);
     z.set_zero(bn_env);
   }
 
-  inline __device__ void dbl(env_t& bn_env, DevAltBn128G1* dev_c, uint32_t* res, uint32_t* buffer, env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus, const uint64_t inv) const {
+  inline __device__ void dbl(const env_t& bn_env, DevAltBn128G1* dev_c, uint32_t* res, uint32_t* buffer, env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus, const uint64_t inv) const {
     if(is_zero(bn_env)){
       //store(bn_env, c, instance);
       dev_c->copy_from(bn_env, *this);
@@ -257,7 +257,7 @@ struct DevAltBn128G1{
   }
 };
 
-inline __device__ void dev_alt_bn128_g1_add(env_t& bn_env, const DevAltBn128G1& dev_a, const DevAltBn128G1& dev_b, DevAltBn128G1* dev_c, uint32_t* res, uint32_t* buffer, env_t::cgbn_t& tmax_value, const env_t::cgbn_t& modulus, const uint64_t inv){
+inline __device__ void dev_alt_bn128_g1_add(const env_t& bn_env, const DevAltBn128G1& dev_a, const DevAltBn128G1& dev_b, DevAltBn128G1* dev_c, uint32_t* res, uint32_t* buffer, env_t::cgbn_t& tmax_value, const env_t::cgbn_t& modulus, const uint64_t inv){
 
   if(dev_a.is_zero(bn_env)){
    // dev_b.store(bn_env, c, instance);
