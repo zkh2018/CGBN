@@ -51,6 +51,11 @@ void alt_bn128_g1::copy_from_cpu(const alt_bn128_g1& g1){
   y.copy_from_cpu(g1.y);
   z.copy_from_cpu(g1.z);
 }
+void alt_bn128_g1::copy_from_gpu(const alt_bn128_g1& g1){
+  x.copy_from_gpu(g1.x);
+  y.copy_from_gpu(g1.y);
+  z.copy_from_gpu(g1.z);
+}
 void alt_bn128_g1::copy_to_cpu(alt_bn128_g1& g1){
   g1.x.copy_to_cpu(x);
   g1.y.copy_to_cpu(y);

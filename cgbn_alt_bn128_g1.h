@@ -16,6 +16,7 @@ struct alt_bn128_g1{
   void release();
   void release_host();
   void copy_from_cpu(const alt_bn128_g1& g1);
+  void copy_from_gpu(const alt_bn128_g1& g1);
   void copy_to_cpu(alt_bn128_g1& g1);
   void clear(CudaStream stream = 0);
 };

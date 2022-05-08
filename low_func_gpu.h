@@ -71,6 +71,23 @@ void mcl_bucket_reduce_sum(
     const uint64_t rp,
     CudaStream stream);
 
+void mcl_bucket_reduce_sum_one_bucket(
+    mcl_bn128_g1 data,
+    const int bucket_id,
+    int* starts, int* ends, int* ids,
+    int *d_instance_bucket_ids,
+    mcl_bn128_g1 buckets,
+    const int bucket_num,
+    const int data_size,
+    mcl_bn128_g1 t_zero,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp,
+    CudaStream stream);
+
 void mcl_reverse(mcl_bn128_g1 in, mcl_bn128_g1 out, const int n, const int offset, CudaStream stream);
 
 void mcl_prefix_sum(
