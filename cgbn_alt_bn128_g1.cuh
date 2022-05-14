@@ -116,8 +116,8 @@ struct DevFp{
     print_array(bn_env, mont, buffer);
   }
   inline __device__ void print_64(const env_t& bn_env, uint32_t* buffer){
-    int group_tid = threadIdx.x % TPI;
-    if(group_tid == 0)
+    //int group_tid = threadIdx.x % TPI;
+    //if(group_tid == 0)
     print_array_64(bn_env, mont, buffer);
   }
 };

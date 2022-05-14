@@ -44,7 +44,7 @@ int main(){
             fscanf(fp, "%lu ", &data[j]);
         }
     };
-    for(int i = 0; i < 83876; i++){
+    for(int i = 0; i < 1; i++){
         f(fpa, ax);
         f(fpa, ay);
         f(fpa, az);
@@ -78,7 +78,7 @@ int main(){
         int cmp2 = memcmp(ry, cy, 32);
         int cmp3 = memcmp(rz, cz, 32);
         if(cmp1 != 0 || cmp2 != 0 || cmp3 != 0){
-            printf("compare failed\n");
+            printf("compare failed, %d %d %d\n", cmp1, cmp2, cmp3);
             return;
         }
     }

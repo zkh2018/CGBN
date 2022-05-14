@@ -147,12 +147,23 @@ inline __device__ void dev_neg(const env_t& bn_env, uint32_t* y, uint32_t* const
     dev_neg(bn_env, ly, lx, lp);
 }
 
+__device__ void print64(const env_t& bn_env, const env_t::cgbn_t& a){
+    __shared__ uint32_t cache[8];    
+    cgbn_store(bn_env, cache, a);
+    int group_id = threadIdx.x & (TPI-1);
+    if(group_id == 0){
+        for(int i = 0; i < 4; i++){
+            printf("%lu ", ((uint64_t*)cache)[i]);
+        }
+        printf("\n");
+    }
+}
 
 //buf: size = 2 * N_32 + 2
 //t : size = N_32 + 2 + N_32
 __device__ __forceinline__ void dev_mcl_mul(const env_t& bn_env, 
         env_t::cgbn_t& lz, const env_t::cgbn_t& lx, const env_t::cgbn_t& ly, const env_t::cgbn_t& lp, 
-        const uint32_t* p, uint32_t *buf, uint32_t *t, const uint64_t rp){
+        const uint32_t* p, uint32_t *buf, uint32_t *t, const uint64_t rp, const bool print=false){
     int group_id = threadIdx.x & (TPI-1);
     //cgbn_store(bn_env, t, ly);
     //const uint64_t* p64_y = (uint64_t*)t;
@@ -167,27 +178,63 @@ __device__ __forceinline__ void dev_mcl_mul(const env_t& bn_env,
     //cgbn_mul_wide(bn_env, lwc, lx, lcache);
     uint64_t tmpy;
     cgbn_get_ui64(bn_env, ly, (uint32_t*)&tmpy, 0);  
+    //c=x*y[0]
+    if(print){
+        if(group_id == 0){
+            printf("dev_mul:\n");
+        }
+    }
+    if(print){
+        print64(bn_env, lx);
+        if(group_id == 0)
+            printf("y[0] = %lu\n", tmpy);
+    }
     cgbn_mul_ui64(bn_env, lwt, lx, tmpy);
+    if(print){
+        print64(bn_env, lwt._low);
+    }
+    if(print){
+        if(group_id == 0){
+            printf("end dev_mul:\n");
+        }
+    }
     cgbn_store(bn_env, buf, lwt._low);
     cgbn_store(bn_env, buf + N_32, lwt._high);
+
     cgbn_set(bn_env, lc, lwt._low);
     uint64_t q = c[0] * rp;
     //cgbn_set_ui32(bn_env, lcache, ((uint32_t*)&q)[0], ((uint32_t*)&q)[1]);
     //cgbn_mul_wide(bn_env, lwt2, lp, lcache);
     uint32_t th[2];
 
-    cgbn_mul_ui64(bn_env, lwt, lp, c[0]*rp);
-    q = cgbn_add(bn_env, lc, lc, lwt._low);
+    //t=p*q
+    cgbn_mul_ui64(bn_env, lwt, lp, q);
+    if(print){
+        print64(bn_env, lwt._low);
+    }
+    uint32_t carry = cgbn_add(bn_env, lc, lc, lwt._low);
+    if(print){
+        print64(bn_env, lc);
+    }
     cgbn_store(bn_env, buf, lc);
     cgbn_get_ui64(bn_env, lwt._high, th, 0);
     if(group_id == 0){
-        c[N_64] += *((uint64_t*)th) + q; 
-        c[N_64+1] = 0;
+        //c[N] += t[N] + carry
+        c[N_64] += *((uint64_t*)th) + carry; 
+        //c[N_64+1] = 0;
+    }
+    if(print){
+        if(group_id == 0){
+            for(int i = 0; i < 4;i++){
+                printf("%lu ", c[i]);
+            }
+           printf("\n");
+        }
     }
     c++;
-    //if(group_id == 0){
-    //    c[N_64] = 0;
-    //}
+    if(group_id == 0){
+        c[N_64] = 0;
+    }
     for(int i = 1; i < N_64; i++){
         if(group_id == 0){
             c[N_64+1] = 0;
@@ -195,42 +242,84 @@ __device__ __forceinline__ void dev_mcl_mul(const env_t& bn_env,
         cgbn_load(bn_env, lc, (uint32_t*)c);
         //cgbn_set_ui32(bn_env, lcache, t[i * 2], t[i * 2 + 1]);
         //cgbn_mul_wide(bn_env, lwt, lx, lcache);
+        //t = x * y[i]
         cgbn_get_ui64(bn_env, ly, (uint32_t*)&tmpy, i*2);  
         cgbn_mul_ui64(bn_env, lwt, lx, tmpy);
+        if(print){
+            print64(bn_env, lx);
+            if(group_id==0)
+            printf("y[i]=%lu\n", tmpy);
+            print64(bn_env, lwt._low);
+        }
         cgbn_get_ui64(bn_env, lwt._high, th, 0);
-        q = cgbn_add(bn_env, lc, lc, lwt._low);
+        carry = cgbn_add(bn_env, lc, lc, lwt._low);
+        if(print){
+            print64(bn_env, lc);
+        }
+        //c = c + t
         cgbn_store(bn_env, (uint32_t*)c, lc);
         if(group_id == 0){
-            c[N_64] += *((uint64_t*)th) + q; 
+            if(print)
+                printf("c[n64] = %lu %lu %u\n", c[N_64], *((uint64_t*)th), carry);
+            c[N_64] += *((uint64_t*)th) + carry; 
         }
         q = c[0] * rp;
         //cgbn_set_ui32(bn_env, lcache, ((uint32_t*)&q)[0], ((uint32_t*)&q)[1]);
         //cgbn_mul_wide(bn_env, lwt, lp, lcache);
         cgbn_mul_ui64(bn_env, lwt, lp, q);
+        if(print){
+            print64(bn_env, lwt._low);
+        }
         cgbn_get_ui64(bn_env, lwt._high, th, 0);
         //cgbn_load(bn_env, lc, (uint32_t*)c);
-        q = cgbn_add(bn_env, lc, lc, lwt._low);
+        carry = cgbn_add(bn_env, lc, lc, lwt._low);
+        if(print){
+            print64(bn_env, lc);
+        }
         cgbn_store(bn_env, (uint32_t*)c, lc);
         if(group_id == 0){
-            c[N_64] += *((uint64_t*)th) + q; 
+            c[N_64] += *((uint64_t*)th) + carry; 
+        }
+        if(print){
+            if(group_id == 0){
+                for(int i = 0; i < 4;i++){
+                    printf("%lu ", c[i]);
+                }
+                printf("\n");
+                printf("c[n64] = %lu %lu %u\n", c[N_64], *((uint64_t*)th), carry);
+            }
         }
         c++;
     }
+    if(print){
+        if(group_id == 0){
+            for(int i = 0; i < 4;i++){
+                printf("%lu ", c[i]);
+            }
+            printf("\n");
+        }
+    }
     cgbn_load(bn_env, lc, (uint32_t*)c);
     int sub_ret = cgbn_sub(bn_env, lz, lc, lp);
+    if(print){
+        print64(bn_env, lz);
+        if(group_id == 0){
+            printf("sub_ret=%d\n", sub_ret);
+        }
+    }
     if(sub_ret){
         cgbn_set(bn_env, lz, lc);
     }
 }
 
 //rp = p[0]p[1], p=&p[2]
-inline __device__ void dev_mcl_mul(const env_t& bn_env, uint32_t* z, uint32_t* const x, uint32_t* const y, uint32_t* const p, uint32_t *buf, uint32_t *t, const uint64_t rp){
+inline __device__ void dev_mcl_mul(const env_t& bn_env, uint32_t* z, uint32_t* const x, uint32_t* const y, uint32_t* const p, uint32_t *buf, uint32_t *t, const uint64_t rp, const bool print=false){
     env_t::cgbn_t lx, ly, lp, lz;
     cgbn_load(bn_env, lx, x);
     cgbn_load(bn_env, ly, y);
     cgbn_load(bn_env, lp, p);
 
-    dev_mcl_mul(bn_env, lz, lx, ly, lp, p, buf, t, rp); 
+    dev_mcl_mul(bn_env, lz, lx, ly, lp, p, buf, t, rp, print); 
     cgbn_store(bn_env, z, lz);
 }
 
@@ -251,11 +340,20 @@ inline __device__ void dev_mcl_sqr(const env_t& bn_env, uint32_t* z, uint32_t* c
 
 __global__ void kernel_mcl_mul(
     cgbn_error_report_t* report, 
-    uint32_t* z, uint32_t*x, uint32_t*y, uint32_t* p, const uint64_t rp){
+    uint32_t* z, uint32_t*x, uint32_t*y, uint32_t* p, const uint64_t rp, const bool print=false){
   context_t bn_context(cgbn_report_monitor, report, 0);
   env_t          bn_env(bn_context.env<env_t>());  
   __shared__ uint32_t cache_buf[N_32*2+2], cache_t[N_32];
-  dev_mcl_mul(bn_env, z, x, y, p, cache_buf, cache_t, rp);
+  if(print){
+    if(threadIdx.x == 0){
+        //printf("global:\n");
+        //for(int i = 0; i < 4; i++){
+        //    printf("%lu ", ((uint64_t*)x)[i]);
+        //}
+        //printf("\n");
+    }
+  }
+  dev_mcl_mul(bn_env, z, x, y, p, cache_buf, cache_t, rp, print);
 }
 
 struct MclFp: public DevFp {
@@ -1271,6 +1369,9 @@ __global__ void kernel_mcl_bucket_reduce_g1_test_one_bucket(
   env_t          bn_env(bn_context.env<env_t>());  
 
   __shared__ uint32_t cache_buf[3*(N_32*2+2)];
+  if(threadIdx.x ==0){
+    printf("start = %d\n", start);
+  }
 
   MclFp lone, lp, la;
   load(bn_env, lone, one, 0); 
@@ -1278,15 +1379,66 @@ __global__ void kernel_mcl_bucket_reduce_g1_test_one_bucket(
   load(bn_env, lp, p, 0); 
   lp.ptr = (uint32_t*)p.mont_repr_data;
 
-  DevEct result;
+  DevEct result, da, db;
   load(bn_env, result, data, start);
+  //load(bn_env, da, data, start);
+  //load(bn_env, db, data, start + 1);
+ // if(threadIdx.x == 0){
+ //   printf("gpu:\n");
+ // }
+
+ //   da.x.print_64(bn_env, cache_buf);
+ //   da.y.print_64(bn_env, cache_buf);
+ //   da.z.print_64(bn_env, cache_buf);
+ // if(threadIdx.x == 0){
+ //   printf("\n");
+ // }
+    //printf("\n");
+    //printf("gpu:db:\n");
+ //   db.x.print_64(bn_env, cache_buf);
+ //   db.y.print_64(bn_env, cache_buf);
+ //   db.z.print_64(bn_env, cache_buf);
+ // if(threadIdx.x == 0){
+ //   printf("\n");
+ // }
+ // add(bn_env, result, da, db, lone, lp, specialA_, cache_buf, nullptr, la, mode_, rp);  
+ // store(bn_env, buckets, result, 0);
+  //if(threadIdx.x == 0){
+    //printf("\n");
+    //printf("gpu:da:\n");
+  //  da.x.print_64(bn_env, cache_buf);
+  //  da.y.print_64(bn_env, cache_buf);
+  //  da.z.print_64(bn_env, cache_buf);
+  //if(threadIdx.x == 0){
+  //  printf("\n");
+  //}
+    //printf("\n");
+    //printf("gpu:db:\n");
+  //  db.x.print_64(bn_env, cache_buf);
+  //  db.y.print_64(bn_env, cache_buf);
+  //  db.z.print_64(bn_env, cache_buf);
+  //if(threadIdx.x == 0){
+  //  printf("\n");
+  //}
+    //printf("\n");
+    //printf("gpu:result:\n");
+  //  result.x.print_64(bn_env, cache_buf);
+  //  result.y.print_64(bn_env, cache_buf);
+  //  result.z.print_64(bn_env, cache_buf);
+  //if(threadIdx.x == 0){
+  //  printf("\n");
+  //}
+    //printf("\n");
+  //}
+  //return;
   
   for(int i = 1; i < bucket_size; i+=1){
       DevEct other;
       load(bn_env, other, data, start + i);
-      add(bn_env, result, result, other, lone, lp, specialA_, cache_buf + 3 * (N_32 * 2 + 2), nullptr, la, mode_, rp);  
+      add(bn_env, result, result, other, lone, lp, specialA_, cache_buf, nullptr, la, mode_, rp);  
+      store(bn_env, buckets, result, i-1);
   }
-  store(bn_env, buckets, result, bucket_id);
+  ///store(bn_env, buckets, result, bucket_id);
 }
 
 __global__ void kernel_mcl_update_ends2(
@@ -1360,7 +1512,7 @@ void mcl_bucket_reduce_sum(
   bucket_ids = d_instance_bucket_ids + data_size;
   int threads = 256;
   int blocks = (bucket_num + threads-1) / threads;
-  if(true){
+  if(false){
       kernel_mcl_calc_bucket_half_size<<<blocks, threads, 0, stream>>>(starts, ends, half_sizes, bucket_num);
       //CUDA_CHECK(cudaDeviceSynchronize());
       while(1){
@@ -1387,7 +1539,7 @@ void mcl_bucket_reduce_sum(
   }
 
   //debug
-  if(false){
+  if(true){
       const int local_instances = 64;
       const int blocks = (bucket_num + local_instances-1)/local_instances;
       kernel_mcl_bucket_reduce_g1_test<local_instances><<<blocks, local_instances*TPI, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, bucket_num, t_zero, one, p, a, specialA_, mode_, rp); 
