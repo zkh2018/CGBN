@@ -1512,7 +1512,7 @@ void mcl_bucket_reduce_sum(
   bucket_ids = d_instance_bucket_ids + data_size;
   int threads = 256;
   int blocks = (bucket_num + threads-1) / threads;
-  if(false){
+  if(true){
       kernel_mcl_calc_bucket_half_size<<<blocks, threads, 0, stream>>>(starts, ends, half_sizes, bucket_num);
       //CUDA_CHECK(cudaDeviceSynchronize());
       while(1){
@@ -1539,7 +1539,7 @@ void mcl_bucket_reduce_sum(
   }
 
   //debug
-  if(true){
+  if(false){
       const int local_instances = 64;
       const int blocks = (bucket_num + local_instances-1)/local_instances;
       kernel_mcl_bucket_reduce_g1_test<local_instances><<<blocks, local_instances*TPI, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, bucket_num, t_zero, one, p, a, specialA_, mode_, rp); 
