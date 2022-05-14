@@ -232,7 +232,7 @@ __host__ __device__ __forceinline__ void cgbn_mul_ui64(env_t env, typename env_t
         tmp6 = 1;
   }
   cgbn_shift_left(env, r._low, r._low, 32); 
-  cgbn_set_ui32(env, r._high, tmp5, tmp1 + tmp6);
+  cgbn_set_ui32(env, r._high, tmp5, tmp1 + tmp6 + tmp3);
   cgbn_add_ui32(env, r._low, r._low, carry);
 }
 
