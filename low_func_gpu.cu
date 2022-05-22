@@ -24,7 +24,11 @@ void gpu_mcl_sub(uint32_t* z, uint32_t *x, uint32_t *y, uint32_t *p){
 void gpu_mcl_mul(uint32_t* z, uint32_t *x, uint32_t *y, uint32_t *p, const uint64_t rp, const bool print=false){
   cgbn_error_report_t *report = nullptr;
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
-  kernel_mcl_mul<<<1, 8>>>(report, z, x, y, p, rp, print);
+  if(print){
+      kernel_mcl_mul<true><<<1, 8>>>(report, z, x, y, p, rp);
+  }else{
+      kernel_mcl_mul<false><<<1, 8>>>(report, z, x, y, p, rp);
+  }
 }
 
 void gpu_mcl_ect_add(mcl_bn128_g1 R, mcl_bn128_g1 P, mcl_bn128_g1 Q, Fp_model one, Fp_model p, Fp_model a, const int specialA_, const int model_, const uint64_t rp){

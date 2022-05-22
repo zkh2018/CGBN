@@ -112,6 +112,12 @@ void alt_bn128_g1_reduce_sum_one_instance(
     cgbn_mem_t<BITS>* modulus, const uint64_t inv,
     const int max_reduce_depth);
 
+void alt_bn128_g1_elementwise_mul_scalar(
+    Fp_model datas, 
+    Fp_model sconst, 
+    const uint32_t n,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv);
+
 void init_error_report();
 void warm_up();
 

@@ -161,9 +161,10 @@ __device__ void print64(const env_t& bn_env, const env_t::cgbn_t& a){
 
 //buf: size = 2 * N_32 + 2
 //t : size = N_32 + 2 + N_32
+template<bool print=false>
 __device__ __forceinline__ void dev_mcl_mul(const env_t& bn_env, 
         env_t::cgbn_t& lz, const env_t::cgbn_t& lx, const env_t::cgbn_t& ly, const env_t::cgbn_t& lp, 
-        const uint32_t* p, uint32_t *buf, uint32_t *t, const uint64_t rp, const bool print=false){
+        const uint32_t* p, uint32_t *buf, uint32_t *t, const uint64_t rp){
     int group_id = threadIdx.x & (TPI-1);
     //cgbn_store(bn_env, t, ly);
     //const uint64_t* p64_y = (uint64_t*)t;
@@ -313,13 +314,14 @@ __device__ __forceinline__ void dev_mcl_mul(const env_t& bn_env,
 }
 
 //rp = p[0]p[1], p=&p[2]
-inline __device__ void dev_mcl_mul(const env_t& bn_env, uint32_t* z, uint32_t* const x, uint32_t* const y, uint32_t* const p, uint32_t *buf, uint32_t *t, const uint64_t rp, const bool print=false){
+template<bool print=false>
+inline __device__ void dev_mcl_mul(const env_t& bn_env, uint32_t* z, uint32_t* const x, uint32_t* const y, uint32_t* const p, uint32_t *buf, uint32_t *t, const uint64_t rp){
     env_t::cgbn_t lx, ly, lp, lz;
     cgbn_load(bn_env, lx, x);
     cgbn_load(bn_env, ly, y);
     cgbn_load(bn_env, lp, p);
 
-    dev_mcl_mul(bn_env, lz, lx, ly, lp, p, buf, t, rp, print); 
+    dev_mcl_mul<print>(bn_env, lz, lx, ly, lp, p, buf, t, rp); 
     cgbn_store(bn_env, z, lz);
 }
 
@@ -338,9 +340,10 @@ inline __device__ void dev_mcl_sqr(const env_t& bn_env, uint32_t* z, uint32_t* c
     cgbn_store(bn_env, z, lz);
 }
 
+template<bool print=false>
 __global__ void kernel_mcl_mul(
     cgbn_error_report_t* report, 
-    uint32_t* z, uint32_t*x, uint32_t*y, uint32_t* p, const uint64_t rp, const bool print=false){
+    uint32_t* z, uint32_t*x, uint32_t*y, uint32_t* p, const uint64_t rp){
   context_t bn_context(cgbn_report_monitor, report, 0);
   env_t          bn_env(bn_context.env<env_t>());  
   __shared__ uint32_t cache_buf[N_32*2+2], cache_t[N_32];
@@ -353,7 +356,7 @@ __global__ void kernel_mcl_mul(
         //printf("\n");
     }
   }
-  dev_mcl_mul(bn_env, z, x, y, p, cache_buf, cache_t, rp, print);
+  dev_mcl_mul<print>(bn_env, z, x, y, p, cache_buf, cache_t, rp);
 }
 
 struct MclFp: public DevFp {

@@ -968,6 +968,55 @@ void alt_bn128_g1_reduce_sum2(
   }
 }
 
+template<int BlockInstances>
+__global__ void kernel_elementwise_mul_scalar(
+    cgbn_error_report_t* report,
+    Fp_model datas, 
+    Fp_model sconst, 
+    const uint32_t n,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv){
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int instance = tid / TPI;
+  const int local_instance = threadIdx.x / TPI;
+  const int local_instances = blockDim.x / TPI;
+  if(instance >= n) return;
+
+  context_t bn_context(cgbn_report_monitor, report, instance);
+  env_t          bn_env(bn_context.env<env_t>());  
+
+  __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
+  uint32_t *res = &cache[local_instance * 3 * BITS/32];
+  __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
+  uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+
+  env_t::cgbn_t local_modulus;
+  cgbn_load(bn_env, local_modulus, modulus);
+  DevFp local_sconst;
+  local_sconst.load(bn_env, sconst, 0);
+  for(int i = instance; i < n; i += gridDim.x * local_instances){
+    DevFp a;
+    a.load(bn_env, datas, i);
+    a = a.mul(bn_env, local_sconst, res, buffer, local_modulus, inv);
+    a.store(bn_env, datas, i);
+  }
+}
+
+void alt_bn128_g1_elementwise_mul_scalar(
+    Fp_model datas, 
+    Fp_model sconst, 
+    const uint32_t n,
+    cgbn_mem_t<BITS>* modulus, const uint64_t inv){
+  cgbn_error_report_t *report;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  const int instances = 64;
+  const int threads = instances * TPI;
+  const int blocks = (n + instances - 1) / instances;
+  printf("blocks = %d, threads=%d\n", blocks, threads);
+
+  kernel_elementwise_mul_scalar<instances><<<blocks, threads>>>(report, datas, sconst, n, modulus, inv); 
+  cuda_check(cudaDeviceSynchronize());
+}
+
 
 void init_error_report(){
   get_error_report();
@@ -981,7 +1030,7 @@ __global__ void kernel_warmup(){
 }
 void warm_up(){
   //kernel_warmup<<<1, 1>>>();
-  //CUDA_CHECK(cudaDeviceSynchronize());
+  //cuda_check(cudadevicesynchronize());
   cudaFree(0);
 }
 

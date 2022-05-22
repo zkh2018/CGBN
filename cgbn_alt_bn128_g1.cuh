@@ -79,6 +79,11 @@ struct DevFp{
   inline __device__ void load(const env_t& bn_env, const Fp_model& a, const int offset){
     cgbn_load(bn_env, mont, a.mont_repr_data + offset);
   }
+
+  inline __device__ void store(const env_t& bn_env, Fp_model& a, const int offset){
+    cgbn_store(bn_env, a.mont_repr_data + offset, mont);
+  }
+
   inline __device__ void store(const env_t& bn_env, cgbn_mem_t<BITS>* a, const int offset){
     cgbn_store(bn_env, a + offset, mont);
   }

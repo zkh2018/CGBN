@@ -63,7 +63,7 @@ void Fp_model::copy_from_gpu(const Fp_model& fp){
   copy_gpu_to_gpu(mont_repr_data, fp.mont_repr_data, sizeof(cgbn_mem_t<BITS>) * _count);
 }
 void Fp_model::copy_to_cpu(Fp_model& fp){
-  copy_gpu_to_cpu(mont_repr_data, fp.mont_repr_data, sizeof(cgbn_mem_t<BITS>) * _count);
+  copy_gpu_to_cpu(fp.mont_repr_data, mont_repr_data, sizeof(cgbn_mem_t<BITS>) * _count);
   //copy_gpu_to_cpu(fp.modulus_data, modulus_data, sizeof(cgbn_mem_t<BITS>) * _count);
 }
 
