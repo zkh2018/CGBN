@@ -118,6 +118,56 @@ void alt_bn128_g1_elementwise_mul_scalar(
     const uint32_t n,
     cgbn_mem_t<BITS>* modulus, const uint64_t inv);
 
+void fft_internal(
+    Fp_model in,
+    const int n,
+    Fp_model twiddles,
+    const int twiddles_len,
+    const int twiddle_offset,
+    const int *in_offsets,
+    const int *out_offsets,
+    const int *stage_lengths,
+    const int *radixs,
+    const int *strides,
+    cgbn_mem_t<BITS>* max_value, 
+    cgbn_mem_t<BITS>* modulus, 
+    const uint64_t inv,
+    Fp_model out);
+
+void fft_copy(
+    Fp_model in,
+    Fp_model out,
+    const int *in_offsets,
+    const int *out_offsets,
+    const int *strides,
+    const int n,
+    const int radix);
+
+void butterfly_2(
+        Fp_model out,
+        Fp_model twiddles, 
+        const int twiddle_offset,
+        const int *strides, 
+        const uint32_t stage_length, 
+        const int* out_offsets, 
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv);
+
+void butterfly_4(
+        Fp_model out,
+        Fp_model twiddles, 
+        const int twiddles_len,
+        const int twiddle_offset,
+        const int* strides, 
+        const uint32_t stage_length, 
+        const int* out_offsets, 
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv);
+
 void init_error_report();
 void warm_up();
 

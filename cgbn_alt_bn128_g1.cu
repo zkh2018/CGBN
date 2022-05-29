@@ -1011,12 +1011,569 @@ void alt_bn128_g1_elementwise_mul_scalar(
   const int instances = 64;
   const int threads = instances * TPI;
   const int blocks = (n + instances - 1) / instances;
-  printf("blocks = %d, threads=%d\n", blocks, threads);
+  //printf("blocks = %d, threads=%d\n", blocks, threads);
 
   kernel_elementwise_mul_scalar<instances><<<blocks, threads>>>(report, datas, sconst, n, modulus, inv); 
   cuda_check(cudaDeviceSynchronize());
 }
 
+
+inline __device__ void dev_butterfly_2(
+        env_t& bn_env, 
+        Fp_model& twiddles, 
+        const int twiddle_offset,
+        const uint32_t stride, 
+        const uint32_t stage_length, 
+        uint32_t out_offset, 
+        const env_t::cgbn_t& max_value,
+        const env_t::cgbn_t& modulus,
+        const uint64_t inv,
+        uint32_t *res,
+        uint32_t *buffer,
+        Fp_model& out){
+    unsigned int out_offset2 = out_offset + stage_length;
+    DevFp out1, out2;
+    //FieldT t = out[out_offset2];
+    out2.load(bn_env, out, out_offset2);
+    out1.load(bn_env, out, out_offset);
+    //out[out_offset2] = out[out_offset] - t;
+    DevFp tmp_out2 = out1.sub(bn_env, out2, max_value, modulus);
+    tmp_out2.store(bn_env, out, out_offset2);
+    //out[out_offset] += t;
+    DevFp tmp_out = out1.add(bn_env, out2, max_value, modulus); 
+    tmp_out.store(bn_env, out, out_offset);
+    out_offset2++;
+    out_offset++;
+    for (unsigned int k = 1; k < stage_length; k++){
+        //FieldT t = twiddles[k] * out[out_offset2];
+        out2.load(bn_env, out, out_offset2);
+        out1.load(bn_env, out, out_offset);
+        DevFp twiddle;
+        twiddle.load(bn_env, twiddles, twiddle_offset + k);
+        DevFp t = twiddle.mul(bn_env, out2, res, buffer, modulus, inv);
+        //out[out_offset2] = out[out_offset] - t;
+        tmp_out2 = out1.sub(bn_env, t, max_value, modulus);
+        tmp_out2.store(bn_env, out, out_offset2);
+        //out[out_offset] += t;
+        tmp_out = out1.add(bn_env, t, max_value, modulus);
+        tmp_out.store(bn_env, out, out_offset);
+        out_offset2++;
+        out_offset++;
+    }
+}
+
+inline __device__ void dev_butterfly_4(
+        env_t& bn_env, 
+        Fp_model& twiddles, 
+        const int twiddles_len,
+        const int twiddle_offset,
+        const uint32_t stride, 
+        const uint32_t stage_length, 
+        uint32_t out_offset, 
+        const env_t::cgbn_t& max_value,
+        const env_t::cgbn_t& modulus,
+        const uint64_t inv,
+        uint32_t *res,
+        uint32_t *buffer,
+        Fp_model& out){
+    DevFp j;
+    j.load(bn_env, twiddles, twiddle_offset + twiddles_len-1);
+    uint32_t tw = 0;
+    /* Case twiddle == one */
+    {
+		const unsigned i0  = out_offset;
+        const unsigned i1  = out_offset + stage_length;
+        const unsigned i2  = out_offset + stage_length*2;
+        const unsigned i3  = out_offset + stage_length*3;
+
+		DevFp z0, z1, z2, z3;
+        //const FieldT z0  = out[i0];
+        z0.load(bn_env, out, i0);
+        //const FieldT z1  = out[i1];
+        z1.load(bn_env, out, i1);
+        //const FieldT z2  = out[i2];
+        z2.load(bn_env, out, i2);
+        //const FieldT z3  = out[i3];
+        z3.load(bn_env, out, i3);
+
+        DevFp t1, t2, t3, t4, t4j;
+        //const FieldT t1  = z0 + z2;
+        t1 = z0.add(bn_env, z2, max_value, modulus);
+        //const FieldT t2  = z1 + z3;
+        t2 = z1.add(bn_env, z3, max_value, modulus);
+        //const FieldT t3  = z0 - z2;
+        t3 = z0.sub(bn_env, z2, max_value, modulus);
+        //const FieldT t4j = j * (z1 - z3);
+        t4 = z1.sub(bn_env, z3, max_value, modulus);
+        t4j = j.mul(bn_env, t4, res, buffer, modulus, inv);
+
+        DevFp out0, out1, out2, out3;
+        //out[i0] = t1 + t2;
+        out0 = t1.add(bn_env, t2, max_value, modulus);
+        out0.store(bn_env, out, i0);
+        //out[i1] = t3 - t4j;
+        out1 = t3.sub(bn_env, t4j, max_value, modulus);
+        out1.store(bn_env, out, i1);
+        //out[i2] = t1 - t2;
+        out2 = t1.sub(bn_env, t2, max_value, modulus);
+        out2.store(bn_env, out, i2);
+        //out[i3] = t3 + t4j;
+        out3 = t3.add(bn_env, t4j, max_value, modulus);
+        out3.store(bn_env, out, i3);
+
+        out_offset++;
+        tw += 3;
+    }
+
+	for (unsigned int k = 1; k < stage_length; k++)
+	{
+		const unsigned i0  = out_offset;
+		const unsigned i1  = out_offset + stage_length;
+		const unsigned i2  = out_offset + stage_length*2;
+		const unsigned i3  = out_offset + stage_length*3;
+
+        DevFp z0, z1, z2, z3;
+        DevFp out0, out1, out2, out3;
+		//const FieldT z0  = out[i0];
+        z0.load(bn_env, out, i0);
+        out1.load(bn_env, out, i1);
+        out2.load(bn_env, out, i2);
+        out3.load(bn_env, out, i3);
+        DevFp tw0, tw1, tw2;
+        tw0.load(bn_env, twiddles, twiddle_offset + tw);
+        tw1.load(bn_env, twiddles, twiddle_offset + tw+1);
+        tw2.load(bn_env, twiddles, twiddle_offset + tw+2);
+		//const FieldT z1  = out[i1] * twiddles[tw];
+        z1 = out1.mul(bn_env, tw0, res, buffer, modulus, inv);
+		//const FieldT z2  = out[i2] * twiddles[tw+1];
+        z2 = out2.mul(bn_env, tw1, res, buffer, modulus, inv);
+		//const FieldT z3  = out[i3] * twiddles[tw+2];
+        z3 = out3.mul(bn_env, tw2, res, buffer, modulus, inv);
+
+        DevFp t1, t2, t3, t4, t4j;
+		//const FieldT t1  = z0 + z2;
+        t1 = z0.add(bn_env, z2, max_value, modulus);
+		//const FieldT t2  = z1 + z3;
+        t2 = z1.add(bn_env, z3, max_value, modulus);
+		//const FieldT t3  = z0 - z2;
+        t3 = z0.sub(bn_env, z2, max_value, modulus);
+		//const FieldT t4j = j * (z1 - z3);
+        t4 = z1.sub(bn_env, z3, max_value, modulus);
+        t4j = j.mul(bn_env, t4, res, buffer, modulus, inv);
+
+		//out[i0] = t1 + t2;
+        out0 = t1.add(bn_env, t2, max_value, modulus);
+        out0.store(bn_env, out, i0);
+		//out[i1] = t3 - t4j;
+        out1 = t3.sub(bn_env, t4j, max_value, modulus);
+        out1.store(bn_env, out, i1);
+		//out[i2] = t1 - t2;
+        out2 = t1.sub(bn_env, t2, max_value, modulus);
+        out2.store(bn_env, out, i2);
+		//out[i3] = t3 + t4j;
+        out3 = t3.add(bn_env, t4j, max_value, modulus);
+        out3.store(bn_env, out, i3);
+
+		out_offset++;
+		tw += 3;
+	}
+
+}
+
+template<int BlockInstances>
+__global__ void kernel_fft_internal(
+    cgbn_error_report_t* report,
+    Fp_model in,
+    const int n,
+    Fp_model twiddles,
+    const int twiddles_len,
+    const int twiddle_offset,
+    const int *in_offsets,
+    const int *out_offsets,
+    const int *stage_lengths,
+    const int *radixs,
+    const int *strides,
+    cgbn_mem_t<BITS>* max_value, 
+    cgbn_mem_t<BITS>* modulus, 
+    const uint64_t inv,
+    Fp_model out){
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int instance = tid / TPI;
+    int local_instance = threadIdx.x / TPI;
+    if(instance >= n) return;
+
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+
+    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
+    uint32_t *res = &cache[local_instance * 3 * BITS/32];
+    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
+    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+
+    env_t::cgbn_t local_max_value, local_modulus;
+    cgbn_load(bn_env, local_max_value, max_value);
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    int in_offset = in_offsets[instance];
+    int out_offset = out_offsets[instance];
+    int stage_length = stage_lengths[instance]; 
+    int radix = radixs[instance];
+    int stride = strides[instance];
+    if(stage_length == 1){
+        for(int k = 0; k < radix; k++){
+            DevFp dev_in;
+            dev_in.load(bn_env, in, in_offset + k * stride);
+            dev_in.store(bn_env, out, out_offset + k); 
+        }
+    }
+    switch(radix)
+    {
+        case 2:
+            dev_butterfly_2(bn_env, twiddles, twiddle_offset, 0, stage_length, out_offset, local_max_value, local_modulus, inv, res, buffer, out);
+            break;
+        case 4:
+            dev_butterfly_4(bn_env, twiddles, twiddles_len, twiddle_offset, 0, stage_length, out_offset, local_max_value, local_modulus, inv, res, buffer, out);
+            break;
+        default:
+            printf("error\n");
+    }
+}
+
+void fft_internal(
+    Fp_model in,
+    const int n,
+    Fp_model twiddles,
+    const int twiddles_len,
+    const int twiddle_offset,
+    const int *in_offsets,
+    const int *out_offsets,
+    const int *stage_lengths,
+    const int *radixs,
+    const int *strides,
+    cgbn_mem_t<BITS>* max_value, 
+    cgbn_mem_t<BITS>* modulus, 
+    const uint64_t inv,
+    Fp_model out){
+  cgbn_error_report_t *report;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    
+  const int instances = 64;
+  int threads = instances * TPI;
+  int blocks = (n + instances - 1) / instances;
+  kernel_fft_internal<instances><<<blocks, threads>>>(
+    report,
+    in, n,
+    twiddles,
+    twiddles_len,
+    twiddle_offset,
+    in_offsets,
+    out_offsets,
+    stage_lengths,
+    radixs,
+    strides,
+    max_value,
+    modulus,
+    inv,
+    out);
+  CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+
+__global__ void kernel_fft_copy(
+    cgbn_error_report_t* report,
+    Fp_model in,
+    Fp_model out,
+    const int *in_offsets,
+    const int *out_offsets,
+    const int *strides,
+    const int n,
+    const int radix){
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid/TPI;
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+
+    if(instance >= n) return;
+
+    const int in_offset = in_offsets[instance];
+    const int out_offset = out_offsets[instance];
+    const int stride = strides[instance];
+
+    for(int i = 0; i < radix; i++){
+        DevFp a;
+        a.load(bn_env, in, in_offset + i * stride); 
+        a.store(bn_env, out, out_offset + i);
+    }
+}
+
+void fft_copy(
+    Fp_model in,
+    Fp_model out,
+    const int *in_offsets,
+    const int *out_offsets,
+    const int *strides,
+    const int n,
+    const int radix){
+  cgbn_error_report_t *report;
+  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  const int instances = 64;
+  int threads = instances * TPI;
+  int blocks = (n + instances - 1) / instances;
+  kernel_fft_copy<<<blocks, threads>>>(report, in, out, in_offsets, out_offsets, strides, n, radix);
+  CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+template<int BlockInstances>
+__global__ void kernel_butterfly_2(
+        cgbn_error_report_t* report,
+        Fp_model out,
+        Fp_model twiddles, 
+        const int twiddle_offset,
+        const int *strides, 
+        const uint32_t stage_length, 
+        const int* out_offsets, 
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid/TPI;
+    const int local_instance = threadIdx.x / TPI;
+    if(instance >= n) return;
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
+    uint32_t *res = &cache[local_instance * 3 * BITS/32];
+    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
+    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+    env_t::cgbn_t local_max_value, local_modulus;
+    cgbn_load(bn_env, local_max_value, max_value);
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    uint32_t out_offset = out_offsets[instance];
+    uint32_t out_offset2 = out_offset + stage_length;
+    DevFp out1, out2;
+    //FieldT t = out[out_offset2];
+    out2.load(bn_env, out, out_offset2);
+    out1.load(bn_env, out, out_offset);
+    //out[out_offset2] = out[out_offset] - t;
+    DevFp tmp_out2 = out1.sub(bn_env, out2, local_max_value, local_modulus);
+    tmp_out2.store(bn_env, out, out_offset2);
+    //out[out_offset] += t;
+    DevFp tmp_out = out1.add(bn_env, out2, local_max_value, local_modulus); 
+    tmp_out.store(bn_env, out, out_offset);
+    out_offset2++;
+    out_offset++;
+    for (unsigned int k = 1; k < stage_length; k++){
+        //FieldT t = twiddles[k] * out[out_offset2];
+        out2.load(bn_env, out, out_offset2);
+        out1.load(bn_env, out, out_offset);
+        DevFp twiddle;
+        twiddle.load(bn_env, twiddles, twiddle_offset + k);
+        DevFp t = twiddle.mul(bn_env, out2, res, buffer, local_modulus, inv);
+        //out[out_offset2] = out[out_offset] - t;
+        tmp_out2 = out1.sub(bn_env, t, local_max_value, local_modulus);
+        tmp_out2.store(bn_env, out, out_offset2);
+        //out[out_offset] += t;
+        tmp_out = out1.add(bn_env, t, local_max_value, local_modulus);
+        tmp_out.store(bn_env, out, out_offset);
+        out_offset2++;
+        out_offset++;
+    }
+}
+
+void butterfly_2(
+        Fp_model out,
+        Fp_model twiddles, 
+        const int twiddle_offset,
+        const int *strides, 
+        const uint32_t stage_length, 
+        const int* out_offsets, 
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    cgbn_error_report_t *report;
+    CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    const int instances = 64;
+    int threads = instances * TPI;
+    int blocks = (n + instances - 1) / instances;
+    kernel_butterfly_2<instances><<<blocks, threads>>>(report, 
+            out, 
+            twiddles, 
+            twiddle_offset,
+            strides, 
+            stage_length, 
+            out_offsets, n, max_value, modulus, inv);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+}
+
+template<int BlockInstances>
+__global__ void kernel_butterfly_4(
+        cgbn_error_report_t* report,
+        Fp_model out,
+        Fp_model twiddles, 
+        const int twiddles_len,
+        const int twiddle_offset,
+        const int* strides, 
+        const uint32_t stage_length, 
+        const int* out_offsets, 
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid/TPI;
+    const int local_instance = threadIdx.x / TPI;
+    if(instance >= n) return;
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
+    uint32_t *res = &cache[local_instance * 3 * BITS/32];
+    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
+    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+    env_t::cgbn_t local_max_value, local_modulus;
+    cgbn_load(bn_env, local_max_value, max_value);
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    const int real_instance = instance / stage_length;
+    const int stage_instance = instance % stage_length;
+    uint32_t out_offset = out_offsets[real_instance] + stage_instance;
+    //uint32_t stride = strides[instance];
+
+    DevFp j;
+    j.load(bn_env, twiddles, twiddle_offset + twiddles_len-1);
+    uint32_t tw = stage_instance * 3;
+    /* Case twiddle == one */
+    if(false){
+		const unsigned i0  = out_offset;
+        const unsigned i1  = out_offset + stage_length;
+        const unsigned i2  = out_offset + stage_length*2;
+        const unsigned i3  = out_offset + stage_length*3;
+
+		DevFp z0, z1, z2, z3;
+        //const FieldT z0  = out[i0];
+        z0.load(bn_env, out, i0);
+        //const FieldT z1  = out[i1];
+        z1.load(bn_env, out, i1);
+        //const FieldT z2  = out[i2];
+        z2.load(bn_env, out, i2);
+        //const FieldT z3  = out[i3];
+        z3.load(bn_env, out, i3);
+
+        DevFp t1, t2, t3, t4, t4j;
+        //const FieldT t1  = z0 + z2;
+        t1 = z0.add(bn_env, z2, local_max_value, local_modulus);
+        //const FieldT t2  = z1 + z3;
+        t2 = z1.add(bn_env, z3, local_max_value, local_modulus);
+        //const FieldT t3  = z0 - z2;
+        t3 = z0.sub(bn_env, z2, local_max_value, local_modulus);
+        //const FieldT t4j = j * (z1 - z3);
+        t4 = z1.sub(bn_env, z3, local_max_value, local_modulus);
+        t4j = j.mul(bn_env, t4, res, buffer, local_modulus, inv);
+
+        DevFp out0, out1, out2, out3;
+        //out[i0] = t1 + t2;
+        out0 = t1.add(bn_env, t2, local_max_value, local_modulus);
+        out0.store(bn_env, out, i0);
+        //out[i1] = t3 - t4j;
+        out1 = t3.sub(bn_env, t4j, local_max_value, local_modulus);
+        out1.store(bn_env, out, i1);
+        //out[i2] = t1 - t2;
+        out2 = t1.sub(bn_env, t2, local_max_value, local_modulus);
+        out2.store(bn_env, out, i2);
+        //out[i3] = t3 + t4j;
+        out3 = t3.add(bn_env, t4j, local_max_value, local_modulus);
+        out3.store(bn_env, out, i3);
+
+        out_offset++;
+        tw += 3;
+    }
+
+	//for (unsigned int k = 0; k < stage_length; k++)
+	{
+		const unsigned i0  = out_offset;
+		const unsigned i1  = out_offset + stage_length;
+		const unsigned i2  = out_offset + stage_length*2;
+		const unsigned i3  = out_offset + stage_length*3;
+
+        DevFp z0, z1, z2, z3;
+        DevFp out0, out1, out2, out3;
+		//const FieldT z0  = out[i0];
+        z0.load(bn_env, out, i0);
+        out1.load(bn_env, out, i1);
+        out2.load(bn_env, out, i2);
+        out3.load(bn_env, out, i3);
+        DevFp tw0, tw1, tw2;
+        tw0.load(bn_env, twiddles, twiddle_offset + tw);
+        tw1.load(bn_env, twiddles, twiddle_offset + tw+1);
+        tw2.load(bn_env, twiddles, twiddle_offset + tw+2);
+		//const FieldT z1  = out[i1] * twiddles[tw];
+        z1 = out1.mul(bn_env, tw0, res, buffer, local_modulus, inv);
+		//const FieldT z2  = out[i2] * twiddles[tw+1];
+        z2 = out2.mul(bn_env, tw1, res, buffer, local_modulus, inv);
+		//const FieldT z3  = out[i3] * twiddles[tw+2];
+        z3 = out3.mul(bn_env, tw2, res, buffer, local_modulus, inv);
+
+        DevFp t1, t2, t3, t4, t4j;
+		//const FieldT t1  = z0 + z2;
+        t1 = z0.add(bn_env, z2, local_max_value, local_modulus);
+		//const FieldT t2  = z1 + z3;
+        t2 = z1.add(bn_env, z3, local_max_value, local_modulus);
+		//const FieldT t3  = z0 - z2;
+        t3 = z0.sub(bn_env, z2, local_max_value, local_modulus);
+		//const FieldT t4j = j * (z1 - z3);
+        t4 = z1.sub(bn_env, z3, local_max_value, local_modulus);
+        t4j = j.mul(bn_env, t4, res, buffer, local_modulus, inv);
+
+		//out[i0] = t1 + t2;
+        out0 = t1.add(bn_env, t2, local_max_value, local_modulus);
+        out0.store(bn_env, out, i0);
+		//out[i1] = t3 - t4j;
+        out1 = t3.sub(bn_env, t4j, local_max_value, local_modulus);
+        out1.store(bn_env, out, i1);
+		//out[i2] = t1 - t2;
+        out2 = t1.sub(bn_env, t2, local_max_value, local_modulus);
+        out2.store(bn_env, out, i2);
+		//out[i3] = t3 + t4j;
+        out3 = t3.add(bn_env, t4j, local_max_value, local_modulus);
+        out3.store(bn_env, out, i3);
+
+		//out_offset++;
+		//tw += 3;
+	}
+
+}
+
+void butterfly_4(
+        Fp_model out,
+        Fp_model twiddles, 
+        const int twiddles_len,
+        const int twiddle_offset,
+        const int* strides, 
+        const uint32_t stage_length, 
+        const int* out_offsets, 
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    cgbn_error_report_t *report;
+    CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    const int instances = 64;
+    int threads = instances * TPI;
+    const int total_n = n * stage_length;
+    int blocks = (total_n + instances - 1) / instances;
+    kernel_butterfly_4<instances><<<blocks, threads>>>(report, 
+            out, 
+            twiddles, 
+            twiddles_len,
+            twiddle_offset,
+            strides, 
+            stage_length, 
+            out_offsets, total_n, max_value, modulus, inv);
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
 
 void init_error_report(){
   get_error_report();
