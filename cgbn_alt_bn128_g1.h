@@ -168,6 +168,16 @@ void butterfly_4(
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv);
 
+void multiply_by_coset_and_constant(
+        Fp_model inputs,
+        const int n,
+        Fp_model g,
+        Fp_model c, 
+        Fp_model one,
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv,
+        const int gmp_bits);
+
 void init_error_report();
 void warm_up();
 

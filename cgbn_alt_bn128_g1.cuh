@@ -56,6 +56,24 @@ struct DevFp{
 
   }
 
+  //operator^
+  inline __device__ DevFp power(const env_t& bn_env, const DevFp& one, uint64_t exponent, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv, const int gmp_num_bits) const {
+        DevFp result;
+        result.set(bn_env, one);
+        bool found_one = false;
+        for(int i = gmp_num_bits-1; i >= 0; i--){
+            if(found_one){
+                result = result.mul(bn_env, result, res, tmp_buffer, modulus, inv);
+            }
+            bool test_bit = ((exponent & (1<<i)) != 0);
+            if(test_bit){
+                found_one = true;
+                result = result.mul(bn_env, *this, res, tmp_buffer, modulus, inv); 
+            }
+        }
+        return result;
+    }
+
   inline __device__ DevFp sub(const env_t& bn_env, const DevFp& other, const env_t::cgbn_t& max_value, const env_t::cgbn_t& modulus) const {
     DevFp ret;
     device_fp_sub(bn_env, ret.mont, mont, other.mont, modulus, max_value);

@@ -1575,6 +1575,69 @@ void butterfly_4(
     CUDA_CHECK(cudaDeviceSynchronize());
 }
 
+template<int BlockInstances>
+__global__ void kernel_multiply_by_coset_and_constant(
+        cgbn_error_report_t* report,
+        Fp_model inputs,
+        const int n,
+        Fp_model g,
+        Fp_model c, 
+        Fp_model one,
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv,
+        const int gmp_num_bits){
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid / TPI;
+    const int local_instance = threadIdx.x / TPI;
+    if(instance >= n) return;
+
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
+    uint32_t *res = &cache[local_instance * 3 * BITS/32];
+    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
+    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+    env_t::cgbn_t local_modulus;
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    DevFp dev_c, dev_g, dev_one;
+    dev_c.load(bn_env, c, 0);
+    dev_g.load(bn_env, g, 0);
+    dev_one.load(bn_env, one, 0);
+    if(instance == 0){
+        DevFp a0;
+        a0.load(bn_env, inputs, 0);
+        a0 = a0.mul(bn_env, dev_c, res, buffer, local_modulus, inv);
+        a0.store(bn_env, inputs, 0);
+    }else{
+        DevFp tmp = dev_g.power(bn_env, dev_one, instance, res, buffer, local_modulus, inv, gmp_num_bits);
+        DevFp u = dev_c.mul(bn_env, tmp, res, buffer, local_modulus, inv);
+        DevFp ai;
+        ai.load(bn_env, inputs, instance);
+        ai = ai.mul(bn_env, u, res, buffer, local_modulus, inv);
+        ai.store(bn_env, inputs, instance);
+    }
+}
+
+void multiply_by_coset_and_constant(
+        Fp_model inputs,
+        const int n,
+        Fp_model g,
+        Fp_model c, 
+        Fp_model one,
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv,
+        const int gmp_num_bits){
+    cgbn_error_report_t *report;
+    CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    const int instances = 64;
+    int threads = instances * TPI;
+    int blocks = (n + instances - 1) / instances;
+    kernel_multiply_by_coset_and_constant<instances><<<blocks, threads>>>(report, inputs, n, g, c, one, modulus, inv, gmp_num_bits); 
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+
 void init_error_report(){
   get_error_report();
 }
