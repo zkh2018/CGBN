@@ -53,6 +53,10 @@ void create_stream(CudaStream* stream){
   cudaStreamCreate(stream);
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
+void release_stream(CudaStream& stream){
+  cudaStreamDestroy(stream);
+  //CUDA_CHECK(cudaDeviceSynchronize());
+}
 
 void sync(CudaStream stream){
   cudaStreamSynchronize(stream);
@@ -119,17 +123,17 @@ void gpu_buffer::release_host(){
   gpu_free_host(ptr);
 }
 
-void gpu_buffer::copy_from_host(gpu_buffer& buf){
-  copy_cpu_to_gpu(ptr, buf.ptr, n * sizeof(cgbn_mem_t<BITS>));
+void gpu_buffer::copy_from_host(gpu_buffer& buf, CudaStream stream){
+  copy_cpu_to_gpu(ptr, buf.ptr, n * sizeof(cgbn_mem_t<BITS>), stream);
 }
-void gpu_buffer::copy_to_host(gpu_buffer& buf){
-  copy_gpu_to_cpu(buf.ptr, ptr, n * sizeof(cgbn_mem_t<BITS>));
+void gpu_buffer::copy_to_host(gpu_buffer& buf, CudaStream stream){
+  copy_gpu_to_cpu(buf.ptr, ptr, n * sizeof(cgbn_mem_t<BITS>), stream);
 }
-void gpu_buffer::copy_from_host(const uint32_t* data, const uint32_t n){
-  copy_cpu_to_gpu((void*)ptr, (void*)data, n * sizeof(uint32_t));
+void gpu_buffer::copy_from_host(const uint32_t* data, const uint32_t n, CudaStream stream){
+  copy_cpu_to_gpu((void*)ptr, (void*)data, n * sizeof(uint32_t), stream);
 }
-void gpu_buffer::copy_to_host(uint32_t* data, const uint32_t n){
-  copy_cpu_to_gpu((void*)data, (void*)ptr, n * sizeof(uint32_t));
+void gpu_buffer::copy_to_host(uint32_t* data, const uint32_t n, CudaStream stream){
+  copy_cpu_to_gpu((void*)data, (void*)ptr, n * sizeof(uint32_t), stream);
 }
 
 __global__ void kernel_add(cgbn_error_report_t* report, cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t *carry, const uint32_t count){

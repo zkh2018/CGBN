@@ -16,6 +16,7 @@ namespace gpu{
 
 typedef cudaStream_t CudaStream;
 void create_stream(CudaStream* stream);
+void release_stream(CudaStream& stream);
 void sync(CudaStream stream);
 void sync_device();
 void gpu_reset();
@@ -48,11 +49,11 @@ struct gpu_buffer{
     n = 0;
   }
 
-  void copy_from_host(gpu_buffer& buf);
-  void copy_to_host(gpu_buffer& buf);
+  void copy_from_host(gpu_buffer& buf, CudaStream stream = 0);
+  void copy_to_host(gpu_buffer& buf, CudaStream stream = 0);
 
-  void copy_from_host(const uint32_t* data, const uint32_t n);
-  void copy_to_host(uint32_t* data, const uint32_t n);
+  void copy_from_host(const uint32_t* data, const uint32_t n, CudaStream stream = 0);
+  void copy_to_host(uint32_t* data, const uint32_t n, CudaStream stream = 0);
 };
 
 int add_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry, const uint32_t count);

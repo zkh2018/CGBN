@@ -45,20 +45,20 @@ void alt_bn128_g2::release_host(){
   y.release_host();
   z.release_host();
 }
-void alt_bn128_g2::copy_from_cpu(const alt_bn128_g2& host){
-  x.copy_from_cpu(host.x);
-  y.copy_from_cpu(host.y);
-  z.copy_from_cpu(host.z);
+void alt_bn128_g2::copy_from_cpu(const alt_bn128_g2& host, CudaStream stream){
+  x.copy_from_cpu(host.x, stream);
+  y.copy_from_cpu(host.y, stream);
+  z.copy_from_cpu(host.z, stream);
 }
-void alt_bn128_g2::copy_from_gpu(const alt_bn128_g2& gpu){
-  x.copy_from_gpu(gpu.x);
-  y.copy_from_gpu(gpu.y);
-  z.copy_from_gpu(gpu.z);
+void alt_bn128_g2::copy_from_gpu(const alt_bn128_g2& gpu, CudaStream stream){
+  x.copy_from_gpu(gpu.x, stream);
+  y.copy_from_gpu(gpu.y, stream);
+  z.copy_from_gpu(gpu.z, stream);
 }
-void alt_bn128_g2::copy_to_cpu(alt_bn128_g2& host){
-  host.x.copy_to_cpu(x);
-  host.y.copy_to_cpu(y);
-  host.z.copy_to_cpu(z);
+void alt_bn128_g2::copy_to_cpu(alt_bn128_g2& host, CudaStream stream){
+  host.x.copy_to_cpu(x, stream);
+  host.y.copy_to_cpu(y, stream);
+  host.z.copy_to_cpu(z, stream);
 }
 void alt_bn128_g2::clear(CudaStream stream ){
   this->x.clear(stream);
