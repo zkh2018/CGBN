@@ -1651,6 +1651,7 @@ __global__ void kernel_warmup(){
 void warm_up(){
   //kernel_warmup<<<1, 1>>>();
   //cuda_check(cudadevicesynchronize());
+  cudaSetDevice(0);
   cudaFree(0);
 }
 

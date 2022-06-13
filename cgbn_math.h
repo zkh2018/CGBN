@@ -33,6 +33,9 @@ struct gpu_meta{
   size_t size = 0;
   void resize(const size_t _size);
   void release();
+  gpu_meta(){
+    ptr = nullptr;
+  }
 };
 
 struct gpu_buffer{
@@ -47,6 +50,7 @@ struct gpu_buffer{
   gpu_buffer(){
     total_n = 0;
     n = 0;
+    ptr = nullptr;
   }
 
   void copy_from_host(gpu_buffer& buf, CudaStream stream = 0);

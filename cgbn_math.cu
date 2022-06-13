@@ -80,7 +80,8 @@ void gpu_meta::resize(const size_t _size){
   }
 }
 void gpu_meta::release(){
-  gpu_free(ptr);
+  if(size > 0 && ptr != nullptr)
+      gpu_free(ptr);
 }
 
 void gpu_buffer::resize(int new_n){
@@ -116,7 +117,8 @@ void gpu_buffer::resize_host(int new_n){
 }
 
 void gpu_buffer::release(){
-  CUDA_CHECK(cudaFree(ptr));
+    if(n > 0 && ptr != nullptr)
+        cudaFree(ptr);
 }
 void gpu_buffer::release_host(){
   //free(ptr);

@@ -47,12 +47,12 @@ void Fp_model::resize_host(const int count){
   //modulus_data = (cgbn_mem_t<BITS>*)malloc(count * sizeof(cgbn_mem_t<BITS>));
 }
 void Fp_model::release(){
-  if(_count > 0)
+  if(mont_repr_data != nullptr)
       gpu_free(mont_repr_data);
   //gpu_free(modulus_data);
 }
 void Fp_model::release_host(){
-  if(_count > 0)
+  if(mont_repr_data != nullptr)
       free(mont_repr_data);
   //free(modulus_data);
 }
