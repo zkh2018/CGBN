@@ -1579,8 +1579,8 @@ void mcl_bucket_reduce_sum_one_bucket(
 
   //debug
   if(true){
-  kernel_mcl_bucket_reduce_g1_test_one_bucket<1><<<1, TPI, 0, stream>>>(report, data, buckets, bucket_id, starts, ends, one, p, a, specialA_, mode_, rp); 
-  CUDA_CHECK(cudaDeviceSynchronize());
+      kernel_mcl_bucket_reduce_g1_test_one_bucket<1><<<1, TPI, 0, stream>>>(report, data, buckets, bucket_id, starts, ends, one, p, a, specialA_, mode_, rp); 
+      //CUDA_CHECK(cudaDeviceSynchronize());
   }
 }
 
