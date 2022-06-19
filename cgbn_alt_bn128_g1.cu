@@ -853,7 +853,7 @@ void alt_bn128_g1_reduce_sum_one_instance(
   uint32_t threads = instances * TPI;
   uint32_t blocks = 1;
   kernel_alt_bn128_g1_reduce_sum<<<blocks, threads>>>(report, partial_in, counters_in, partial_out, counters_out, 1, max_value, t_zero, max_reduce_depth, 1, modulus, inv);
-  CUDA_CHECK(cudaDeviceSynchronize());
+  //CUDA_CHECK(cudaDeviceSynchronize());
   //CGBN_CHECK(report);
 }
 
@@ -1006,15 +1006,16 @@ void alt_bn128_g1_elementwise_mul_scalar(
     Fp_model sconst, 
     const uint32_t n,
     cgbn_mem_t<BITS>* modulus, const uint64_t inv){
-  cgbn_error_report_t *report;
-  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  //cgbn_error_report_t *report;
+  //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  cgbn_error_report_t *report = get_error_report();
   const int instances = 64;
   const int threads = instances * TPI;
   const int blocks = (n + instances - 1) / instances;
   //printf("blocks = %d, threads=%d\n", blocks, threads);
 
   kernel_elementwise_mul_scalar<instances><<<blocks, threads>>>(report, datas, sconst, n, modulus, inv); 
-  cuda_check(cudaDeviceSynchronize());
+  //cuda_check(cudaDeviceSynchronize());
 }
 
 
@@ -1254,8 +1255,9 @@ void fft_internal(
     cgbn_mem_t<BITS>* modulus, 
     const uint64_t inv,
     Fp_model out){
-  cgbn_error_report_t *report;
-  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  //cgbn_error_report_t *report;
+  //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  cgbn_error_report_t *report = get_error_report();
     
   const int instances = 64;
   int threads = instances * TPI;
@@ -1275,7 +1277,7 @@ void fft_internal(
     modulus,
     inv,
     out);
-  CUDA_CHECK(cudaDeviceSynchronize());
+  //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 
@@ -1314,13 +1316,14 @@ void fft_copy(
     const int *strides,
     const int n,
     const int radix){
-  cgbn_error_report_t *report;
-  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  //cgbn_error_report_t *report;
+  //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    cgbn_error_report_t *report = get_error_report();
   const int instances = 64;
   int threads = instances * TPI;
   int blocks = (n + instances - 1) / instances;
   kernel_fft_copy<<<blocks, threads>>>(report, in, out, in_offsets, out_offsets, strides, n, radix);
-  CUDA_CHECK(cudaDeviceSynchronize());
+  //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 template<int BlockInstances>
@@ -1393,8 +1396,9 @@ void butterfly_2(
         cgbn_mem_t<BITS>* max_value, 
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv){
-    cgbn_error_report_t *report;
-    CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    //cgbn_error_report_t *report;
+    //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
     int threads = instances * TPI;
     int blocks = (n + instances - 1) / instances;
@@ -1405,7 +1409,7 @@ void butterfly_2(
             strides, 
             stage_length, 
             out_offsets, n, max_value, modulus, inv);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
 
 }
 
@@ -1558,8 +1562,9 @@ void butterfly_4(
         cgbn_mem_t<BITS>* max_value, 
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv){
-    cgbn_error_report_t *report;
-    CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    //cgbn_error_report_t *report;
+    //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
     int threads = instances * TPI;
     const int total_n = n * stage_length;
@@ -1572,7 +1577,7 @@ void butterfly_4(
             strides, 
             stage_length, 
             out_offsets, total_n, max_value, modulus, inv);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 template<int BlockInstances>
@@ -1628,13 +1633,13 @@ void multiply_by_coset_and_constant(
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv,
         const int gmp_num_bits){
-    cgbn_error_report_t *report;
-    CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+    cgbn_error_report_t *report = get_error_report();
+    //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
     const int instances = 64;
     int threads = instances * TPI;
     int blocks = (n + instances - 1) / instances;
     kernel_multiply_by_coset_and_constant<instances><<<blocks, threads>>>(report, inputs, n, g, c, one, modulus, inv, gmp_num_bits); 
-    CUDA_CHECK(cudaDeviceSynchronize());
+    //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 
