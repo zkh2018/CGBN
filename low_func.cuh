@@ -801,8 +801,8 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_pre(
       if(group_thread == 0){
         density[i] = 1;
       }
-      ///DevFp a = scalar.as_bigint(bn_env, res, buffer, local_field_modulus, field_inv);
-      //a.store(bn_env, bn_exponents, i);
+      DevFp a = scalar.as_bigint(bn_env, res, buffer, local_field_modulus, field_inv);
+      a.store(bn_env, bn_exponents, i);
       count += 1;
     }
   }
