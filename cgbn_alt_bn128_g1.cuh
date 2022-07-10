@@ -61,6 +61,7 @@ struct DevFp{
         DevFp result;
         result.set(bn_env, one);
         bool found_one = false;
+        //gmp_num_bits=64
         for(int i = gmp_num_bits-1; i >= 0; i--){
             if(found_one){
                 result = result.mul(bn_env, result, res, tmp_buffer, modulus, inv);

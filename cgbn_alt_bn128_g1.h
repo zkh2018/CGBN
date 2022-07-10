@@ -178,6 +178,36 @@ void multiply_by_coset_and_constant(
         const uint64_t inv,
         const int gmp_bits);
 
+void calc_xor(
+        Fp_model xor_results,
+        const int n,
+        const int offset,
+        Fp_model g,
+        Fp_model one,
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv,
+        const int gmp_num_bits);
+
+void multiply(
+        Fp_model inputs,
+        Fp_model xor_results,
+        const int n,
+        const int offset,
+        Fp_model c, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv);
+
+void calc_H(
+        Fp_model A,
+        Fp_model B,
+        Fp_model C,
+        Fp_model out,
+        Fp_model Z_inverse_at_coset,
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv);
+
 void init_error_report();
 void warm_up();
 

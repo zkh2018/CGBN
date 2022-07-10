@@ -1642,6 +1642,167 @@ void multiply_by_coset_and_constant(
     //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
+template<int BlockInstances>
+__global__ void kernel_calc_xor(
+        cgbn_error_report_t* report,
+        Fp_model xor_results,
+        const int n,
+        const int offset,
+        Fp_model g,
+        Fp_model one,
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv,
+        const int gmp_num_bits){
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid / TPI;
+    const int local_instance = threadIdx.x / TPI;
+    if(instance >= n-1) return;
+
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
+    uint32_t *res = &cache[local_instance * 3 * BITS/32];
+    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
+    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+    env_t::cgbn_t local_modulus;
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    DevFp dev_g, dev_one;
+    dev_g.load(bn_env, g, 0);
+    dev_one.load(bn_env, one, 0);
+    DevFp xor_result = dev_g.power(bn_env, dev_one, instance + offset, res, buffer, local_modulus, inv, gmp_num_bits);
+    xor_result.store(bn_env, xor_results, instance+offset);
+}
+
+void calc_xor(
+        Fp_model xor_results,
+        const int n,
+        const int offset,
+        Fp_model g,
+        Fp_model one,
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv,
+        const int gmp_num_bits){
+    cgbn_error_report_t *report = get_error_report();
+    const int instances = 64;
+    int threads = instances * TPI;
+    int blocks = (n + instances - 1) / instances;
+    kernel_calc_xor<instances><<<blocks, threads>>>(report, xor_results, n, offset, g, one, modulus, inv, gmp_num_bits); 
+}
+
+template<int BlockInstances>
+__global__ void kernel_multiply(
+        cgbn_error_report_t* report,
+        Fp_model inputs,
+        Fp_model xor_results,
+        const int n,
+        const int offset,
+        Fp_model c, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid / TPI;
+    const int local_instance = threadIdx.x / TPI;
+    if(instance >= n) return;
+
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
+    uint32_t *res = &cache[local_instance * 3 * BITS/32];
+    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
+    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+    env_t::cgbn_t local_modulus;
+    cgbn_load(bn_env, local_modulus, modulus);
+
+    DevFp dev_c;
+    dev_c.load(bn_env, c, 0);
+    if(instance == 0){
+        DevFp a0;
+        a0.load(bn_env, inputs, 0);
+        a0 = a0.mul(bn_env, dev_c, res, buffer, local_modulus, inv);
+        a0.store(bn_env, inputs, 0);
+    }else{
+        DevFp xor_result;
+        xor_result.load(bn_env, xor_results, instance);
+        DevFp u = dev_c.mul(bn_env, xor_result, res, buffer, local_modulus, inv);
+        DevFp ai;
+        ai.load(bn_env, inputs, instance);
+        ai = ai.mul(bn_env, u, res, buffer, local_modulus, inv);
+        ai.store(bn_env, inputs, instance);
+    }
+}
+
+void multiply(
+        Fp_model inputs,
+        Fp_model xor_results,
+        const int n,
+        const int offset,
+        Fp_model c, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    cgbn_error_report_t *report = get_error_report();
+    const int instances = 64;
+    int threads = instances * TPI;
+    int blocks = (n + instances - 1) / instances;
+    kernel_multiply<instances><<<blocks, threads>>>(report, inputs, xor_results, n, offset, c, modulus, inv); 
+}
+
+
+template<int BlockInstances>
+__global__ void kernel_calc_H(
+        cgbn_error_report_t* report,
+        Fp_model A,
+        Fp_model B,
+        Fp_model C,
+        Fp_model out,
+        Fp_model Z_inverse_at_coset,
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid / TPI;
+    const int local_instance = threadIdx.x / TPI;
+    if(instance >= n) return;
+
+    context_t bn_context(cgbn_report_monitor, report, instance);
+    env_t          bn_env(bn_context.env<env_t>());  
+    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
+    uint32_t *res = &cache[local_instance * 3 * BITS/32];
+    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
+    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
+    env_t::cgbn_t local_modulus, local_max_value; 
+    cgbn_load(bn_env, local_modulus, modulus);
+    cgbn_load(bn_env, local_max_value, max_value);
+
+    DevFp dev_a, dev_b, dev_c, dev_out, dev_coset;
+    dev_coset.load(bn_env, Z_inverse_at_coset, 0);
+    dev_a.load(bn_env, A, instance);
+    dev_b.load(bn_env, B, instance);
+    dev_c.load(bn_env, C, instance);
+    DevFp tmp = dev_a.mul(bn_env, dev_b, res, buffer, local_modulus, inv);
+    dev_out = tmp.sub(bn_env, dev_c, local_max_value, local_modulus);
+    dev_out = dev_out.mul(bn_env, dev_coset, res, buffer, local_modulus, inv);
+    dev_out.store(bn_env, out, instance);
+}
+
+void calc_H(
+        Fp_model A,
+        Fp_model B,
+        Fp_model C,
+        Fp_model out,
+        Fp_model Z_inverse_at_coset,
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    cgbn_error_report_t *report = get_error_report();
+    const int instances = 64;
+    int threads = instances * TPI;
+    int blocks = (n + instances - 1) / instances;
+    kernel_calc_H<instances><<<blocks, threads>>>(report, A, B, C, out, Z_inverse_at_coset, n, max_value, modulus, inv); 
+}
+
 
 void init_error_report(){
   get_error_report();
