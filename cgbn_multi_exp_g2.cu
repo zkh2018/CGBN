@@ -243,7 +243,7 @@ void split_to_bucket_g2(
   }
   if(false){
     const int bucket_num = 1<<c;
-    int *tids, *ids, *sorted_tids;
+    int *tids, *sorted_tids;
     cudaMalloc((void**)&tids, data_length * sizeof(int));
     cudaMalloc((void**)&sorted_tids, data_length * sizeof(int));
     //1 get tids
@@ -484,7 +484,6 @@ __global__ void kernel_bucket_reduce_sum_g2(
   const int bucket_id = instance;
   int start = starts[bucket_id];
   const int end = ends[bucket_id];
-  int n = end - start;
 
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  

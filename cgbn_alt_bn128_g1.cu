@@ -7,8 +7,6 @@
 #include <algorithm>
 
 #include "cgbn/cgbn.h"
-//#include "utility/cpu_support.h"
-//#include "utility/cpu_simple_bn_math.h"
 #include "gpu_support.h"
 
 namespace gpu{
@@ -1674,6 +1672,7 @@ __global__ void kernel_calc_xor(
     xor_result.store(bn_env, xor_results, instance+offset);
 }
 
+//xor_result = g^i
 void calc_xor(
         Fp_model xor_results,
         const int n,
@@ -1732,6 +1731,8 @@ __global__ void kernel_multiply(
     }
 }
 
+//inputs[0] *= c
+//inputs[i] *= xor_results[i]
 void multiply(
         Fp_model inputs,
         Fp_model xor_results,
@@ -1786,6 +1787,7 @@ __global__ void kernel_calc_H(
     dev_out.store(bn_env, out, instance);
 }
 
+//out[i] = ((A[i] * B[i]) - C[i]) * Z_inverse_at_coset
 void calc_H(
         Fp_model A,
         Fp_model B,

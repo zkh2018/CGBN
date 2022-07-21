@@ -1126,7 +1126,6 @@ void bucket_reduce_sum(
   if(false){
     const int local_instances = 16;
     const int threads = local_instances * TPI;
-    const int blocks = (bucket_num + local_instances - 1) / local_instances;
     kernel_bucket_reduce_sum_one_instance<local_instances, BUCKET_INSTANCES><<<bucket_num, threads>>>(report, data, starts, ends, bucket_num, buckets, max_value, t_zero, modulus, inv);
   }
   if(true){
@@ -1171,7 +1170,6 @@ void bucket_reduce_sum(
   }
 
   if(false){
-	  const int init_blocks = (bucket_num * BUCKET_INSTANCES) / 64;
 
   std::vector<std::vector<int>> sections = {
                     {128, 10240000}

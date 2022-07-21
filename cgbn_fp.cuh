@@ -397,7 +397,7 @@ inline __device__ void device_squared(const env_t& bn_env, const Fp_model& x, ui
       inv);
 }
 
-static cgbn_error_report_t* get_error_report(){
+static inline cgbn_error_report_t* get_error_report(){
   static cgbn_error_report_t* report = nullptr;
   if(report == nullptr){
     CUDA_CHECK(cgbn_error_report_alloc(&report)); 

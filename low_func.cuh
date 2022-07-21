@@ -112,14 +112,6 @@ inline __device__ void dev_mcl_sub(const env_t& bn_env, uint32_t* z, uint32_t* c
     cgbn_load(bn_env, lp, p);
     dev_mcl_sub(bn_env, lz, lx, ly, lp);
     cgbn_store(bn_env, z, lz);
-    //int ret = cgbn_sub(bn_env, d, a, b);
-    //if(ret){
-    //    cgbn_load(bn_env, c, p);
-    //    cgbn_add(bn_env, a, d, c);
-    //    cgbn_store(bn_env, z, a);
-    //    return;
-    //}
-    //cgbn_store(bn_env, z, d);
 }
 
 __global__ void kernel_mcl_sub(
@@ -905,7 +897,6 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_one_range5_test(
 
   const int first = firsts[instance];
   const int second = seconds[instance];
-  const int reduce_depth = second - first;//30130
 
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
@@ -1382,58 +1373,8 @@ __global__ void kernel_mcl_bucket_reduce_g1_test_one_bucket(
   load(bn_env, lp, p, 0); 
   lp.ptr = (uint32_t*)p.mont_repr_data;
 
-  DevEct result, da, db;
+  DevEct result;
   load(bn_env, result, data, start);
-  //load(bn_env, da, data, start);
-  //load(bn_env, db, data, start + 1);
- // if(threadIdx.x == 0){
- //   printf("gpu:\n");
- // }
-
- //   da.x.print_64(bn_env, cache_buf);
- //   da.y.print_64(bn_env, cache_buf);
- //   da.z.print_64(bn_env, cache_buf);
- // if(threadIdx.x == 0){
- //   printf("\n");
- // }
-    //printf("\n");
-    //printf("gpu:db:\n");
- //   db.x.print_64(bn_env, cache_buf);
- //   db.y.print_64(bn_env, cache_buf);
- //   db.z.print_64(bn_env, cache_buf);
- // if(threadIdx.x == 0){
- //   printf("\n");
- // }
- // add(bn_env, result, da, db, lone, lp, specialA_, cache_buf, nullptr, la, mode_, rp);  
- // store(bn_env, buckets, result, 0);
-  //if(threadIdx.x == 0){
-    //printf("\n");
-    //printf("gpu:da:\n");
-  //  da.x.print_64(bn_env, cache_buf);
-  //  da.y.print_64(bn_env, cache_buf);
-  //  da.z.print_64(bn_env, cache_buf);
-  //if(threadIdx.x == 0){
-  //  printf("\n");
-  //}
-    //printf("\n");
-    //printf("gpu:db:\n");
-  //  db.x.print_64(bn_env, cache_buf);
-  //  db.y.print_64(bn_env, cache_buf);
-  //  db.z.print_64(bn_env, cache_buf);
-  //if(threadIdx.x == 0){
-  //  printf("\n");
-  //}
-    //printf("\n");
-    //printf("gpu:result:\n");
-  //  result.x.print_64(bn_env, cache_buf);
-  //  result.y.print_64(bn_env, cache_buf);
-  //  result.z.print_64(bn_env, cache_buf);
-  //if(threadIdx.x == 0){
-  //  printf("\n");
-  //}
-    //printf("\n");
-  //}
-  //return;
   
   for(int i = 1; i < bucket_size; i+=1){
       DevEct other;
@@ -1571,16 +1512,9 @@ void mcl_bucket_reduce_sum_one_bucket(
     const uint64_t rp,
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
-  int *half_sizes, *bucket_ids;
-  int* bucket_tids = d_instance_bucket_ids;
-  half_sizes = ids;
-  bucket_ids = d_instance_bucket_ids + data_size;
-  int threads = 256;
 
-  //debug
   if(true){
       kernel_mcl_bucket_reduce_g1_test_one_bucket<1><<<1, TPI, 0, stream>>>(report, data, buckets, bucket_id, starts, ends, one, p, a, specialA_, mode_, rp); 
-      //CUDA_CHECK(cudaDeviceSynchronize());
   }
 }
 
