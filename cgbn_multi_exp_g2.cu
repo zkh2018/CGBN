@@ -724,7 +724,7 @@ void bucket_reduce_sum_g2(
                     //{2, 10240000}
   };
   int *d_instances = d_instance_bucket_ids + data_size;
-  for(int i = 0; i < sections.size(); i++){
+  for(uint64_t i = 0; i < sections.size(); i++){
     int left = sections[i][0];
     int right = sections[i][1];
     while(1){
