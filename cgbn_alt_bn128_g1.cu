@@ -2,12 +2,8 @@
 #include "cgbn_alt_bn128_g1.h"
 #include "cgbn_alt_bn128_g1.cuh"
 
-#include <cuda_runtime.h>
-#include <cuda.h>
 #include <algorithm>
 
-#include "cgbn/cgbn.h"
-#include "gpu_support.h"
 
 namespace gpu{
 

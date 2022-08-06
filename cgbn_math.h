@@ -8,11 +8,19 @@
 #include "cgbn/cgbn_mem.h"
 
 #include <cuda_runtime.h>
+#include "cgbn/cgbn.h"
+#include "gpu_support.h"
 
-const int BITS=256;
+const int BITS = 256;
+const int BITS_PER_NUM = 32;
+const int NUM = BITS/BITS_PER_NUM; 
 #define BlockDepth 64
 
 namespace gpu{
+#define TPI 8
+typedef cgbn_context_t<TPI> context_t;
+typedef cgbn_env_t<context_t, BITS> env_t;
+#define max_threads_per_block  (512/TPI)
 
 typedef cudaStream_t CudaStream;
 void create_stream(CudaStream* stream);

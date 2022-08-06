@@ -1,15 +1,6 @@
 #include "cgbn_alt_bn128_g2.h"
 #include "cgbn_alt_bn128_g2.cuh"
 
-#include <cuda_runtime.h>
-#include <cuda.h>
-#include <algorithm>
-
-#include "cgbn/cgbn.h"
-//#include "utility/cpu_support.h"
-//#include "utility/cpu_simple_bn_math.h"
-#include "gpu_support.h"
-
 namespace gpu{
 
 alt_bn128_g2::alt_bn128_g2(const int count){

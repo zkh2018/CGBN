@@ -2,20 +2,9 @@
 #define CGBN_FP_CUH
 
 #include "cgbn_math.h"
-#include <cuda_runtime.h>
-#include <cuda.h>
-
-#include "cgbn/cgbn.h"
-//#include "utility/cpu_support.h"
-//#include "utility/cpu_simple_bn_math.h"
-#include "gpu_support.h"
 
 namespace gpu{
 
-#define TPI 8
-typedef cgbn_context_t<TPI> context_t;
-typedef cgbn_env_t<context_t, BITS> env_t;
-#define max_threads_per_block  (512/TPI)
 
 inline __device__ void device_fp_add(const env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
   env_t::cgbn_t tin1, tin2, tmodule_data, tscratch;
@@ -188,7 +177,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res,cgbn
   cgbn_load(bn_env, tin2, in2);   
   cgbn_load(bn_env, tmodule_data, module_data);     
 
-  const int n = 8;
+  const int n = NUM;
   env_t::cgbn_wide_t tc;
   cgbn_mul_wide(bn_env, tc, tin1, tin2);
   cgbn_store(bn_env, res, tc._low);
@@ -204,7 +193,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res,cgbn
       uint32_t *p32 = (uint32_t*)&k;
       tmp_buffer->_limbs[0] = p32[0];
       tmp_buffer->_limbs[1] = p32[1];
-      for(int j = 2; j < 8; j++){
+      for(int j = 2; j < NUM; j++){
         tmp_buffer->_limbs[j] = 0;
       }
     }
@@ -243,7 +232,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res,cgbn
   cgbn_load(bn_env, tin1, in1);  
   cgbn_load(bn_env, tmodule_data, module_data);     
 
-  const int n = BITS/32;
+  const int n = NUM;
   env_t::cgbn_wide_t tc;
   cgbn_mul_wide(bn_env, tc, tin1, tin2);
   cgbn_store(bn_env, res, tc._low);
@@ -259,7 +248,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res,cgbn
       uint32_t *p32 = (uint32_t*)&k;
       tmp_buffer->_limbs[0] = p32[0];
       tmp_buffer->_limbs[1] = p32[1];
-      for(int j = 2; j < BITS/32; j++){
+      for(int j = 2; j < NUM; j++){
 	tmp_buffer->_limbs[j] = 0;
       }
     }
@@ -297,7 +286,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
   env_t::cgbn_t tmodule_data, tb, tres,tres2, add_res;                                             
   cgbn_load(bn_env, tmodule_data, module_data);     
 
-  const int n = BITS/32;
+  const int n = NUM;
   env_t::cgbn_wide_t tc;
   cgbn_mul_wide(bn_env, tc, tin1, tin2);
   cgbn_store(bn_env, res, tc._low);
@@ -313,7 +302,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
       uint32_t *p32 = (uint32_t*)&k;
       tmp_buffer->_limbs[0] = p32[0];
       tmp_buffer->_limbs[1] = p32[1];
-      for(int j = 2; j < BITS/32; j++){
+      for(int j = 2; j < NUM; j++){
 	tmp_buffer->_limbs[j] = 0;
       }
     }
@@ -349,7 +338,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
 inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, const env_t::cgbn_t& tmodule_data, uint32_t* tmp_buffer, const uint64_t inv){
   const int group_thread = threadIdx.x & (TPI-1);
   env_t::cgbn_t tb, tres, add_res;                                             
-  const int n = BITS/32;
+  const int n = NUM;
   env_t::cgbn_wide_t tc;
   cgbn_mul_wide(bn_env, tc, tin1, tin2);
   cgbn_store(bn_env, res, tc._low);
