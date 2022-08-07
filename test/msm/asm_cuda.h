@@ -82,7 +82,7 @@ __device__ static inline void reduce(blst_fp x, const blst_fp p) {
 // The Montgomery reduction here is based on Algorithm 14.32 in
 // Handbook of Applied Cryptography
 // <http://cacr.uwaterloo.ca/hac/about/chap14.pdf>.
-__device__ static inline void mont_384(blst_fp ret, limb_t r[12], const blst_fp p, const limb_t p_inv) {
+__device__ static inline void mont_384(blst_fp ret, limb_t r[12], const blst_fp p, const limb_t p_inv, const bool need_reduce=true) {
     // printf("c-t%i:0: %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu\n", threadIdx.x, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]);
     limb_t k = r[0] * p_inv;
     limb_t cross_carry = 0;
@@ -441,7 +441,9 @@ __device__ static inline void mont_384(blst_fp ret, limb_t r[12], const blst_fp 
     // printf("c-t%i:6: %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu\n", threadIdx.x, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]);
 
     memcpy(ret, r + 6, sizeof(limb_t) * 6);
-    reduce(ret, p);
+    if(need_reduce){
+        reduce(ret, p);
+    }
 }
 
 __device__ void mul_mont_384(blst_fp ret, const blst_fp a, const blst_fp b, const blst_fp p, limb_t p_inv) {

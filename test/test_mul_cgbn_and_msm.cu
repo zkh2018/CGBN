@@ -6,9 +6,6 @@
 #include "cgbn_alt_bn128_g1.cuh"
 #include <stdint.h>
 
-#define BITS 384
-typedef cgbn_context_t<TPI> context_t;
-typedef cgbn_env_t<context_t, BITS> env_t;
 using namespace gpu;
 
 __global__ void kernel_msm_mul(
@@ -254,18 +251,91 @@ __global__ void kernel_cgbn_mont_mul(
   env_t          bn_env(bn_context.env<env_t>());  
 
 
-  __shared__ uint32_t res[NUM * 3], buffer[NUM];
+  //__shared__ uint32_t res[NUM * 3], buffer[NUM];
   
   DevFp dev_a, dev_b, dev_c, dev_p;
   cgbn_load(bn_env, dev_a.mont, a);
   cgbn_load(bn_env, dev_b.mont, b);
   cgbn_load(bn_env, dev_p.mont, p);
-  dev_c = dev_a.mul(bn_env, dev_b, res, buffer, dev_p.mont, inv);
+  //dev_c = dev_a.mul(bn_env, dev_b, res, buffer, dev_p.mont, inv);
   //uint32_t np0=cgbn_bn2mont(bn_env, dev_a.mont, dev_a.mont, dev_p.mont);
   //cgbn_bn2mont(bn_env, dev_b.mont, dev_b.mont, dev_p.mont);
   //cgbn_mont_mul(bn_env, dev_c.mont, dev_a.mont, dev_b.mont, dev_p.mont, np0);
   //cgbn_mont2bn(bn_env, dev_c.mont, dev_c.mont, dev_p.mont, np0);
-  cgbn_store(bn_env, c, dev_c.mont);
+  env_t::cgbn_wide_t tc;
+  cgbn_mul_wide(bn_env, tc, dev_a.mont, dev_b.mont);
+  __shared__ uint32_t cache_c[24];
+  __shared__ uint32_t cache_cc[12];
+  cgbn_store(bn_env, cache_c, tc._low);
+  cgbn_store(bn_env, cache_c + 12, tc._high);
+  if(threadIdx.x == 0){
+      mont_384((limb_t*)cache_cc, (limb_t*)cache_c, (limb_t*)p, (limb_t)inv, false); 
+      //uint64_t* c64 = (uint64_t *)c;
+      //c64[0] = ((uint64_t*)cache_cc)[0];
+      //c64[1] = ((uint64_t*)cache_cc)[1];
+      //c64[2] = ((uint64_t*)cache_cc)[2];
+      //c64[3] = ((uint64_t*)cache_cc)[3];
+      //c64[4] = ((uint64_t*)cache_cc)[4];
+      //c64[5] = ((uint64_t*)cache_cc)[5];
+  }
+  ///__syncthreads();
+  //c[threadIdx.x] = cache_cc[threadIdx.x];
+  cgbn_load(bn_env, dev_c.mont, cache_cc);
+  if(cgbn_compare(bn_env, dev_c.mont, dev_p.mont) >= 0){
+    cgbn_sub(bn_env, tc._low, dev_c.mont, dev_p.mont);
+    cgbn_store(bn_env, c, tc._low);
+  }else{
+    cgbn_store(bn_env, c, dev_c.mont);
+  }
+
+  //cgbn_store(bn_env, c, dev_c.mont);
+}
+
+void mpz_mul(mp_limb_t a[6], mp_limb_t b[6], mp_limb_t p[6], mp_limb_t inv, mp_limb_t c[6]){
+printf("\n");
+    const int n = 6;
+	mp_limb_t res[2*n];
+	mpn_mul_n(res, a, b, n);
+	/*
+	   The Montgomery reduction here is based on Algorithm 14.32 in
+	   Handbook of Applied Cryptography
+	   <http://cacr.uwaterloo.ca/hac/about/chap14.pdf>.
+	 */
+
+	for (size_t i = 0; i < n; ++i)
+	{
+		mp_limb_t k = inv * res[i];
+        printf("k = %lu\n", k);
+		/* calculate res = res + k * mod * b^i */
+		//mp_limb_t carryout = mpn_addmul_1(res+i, p, n, k);
+        mp_limb_t tmp[n];
+        mp_limb_t carry1 = mpn_mul_1(tmp, p, n, k);
+        printf("mul_1 %lu %u %u:", carry1, (uint32_t)carry1, (carry1>>32));
+        for(int j = 0; j < n; j++){
+            printf("%lu ", tmp[j]);
+        }
+        printf("\n");
+        mp_limb_t carry2 = mpn_add_n(res+i, res+i, tmp, n);
+        mp_limb_t carryout = carry1+carry2;
+        printf("add %lu:", carry2);
+        for(int j = 0; j < n; j++){
+            printf("%lu ", res[i+j]);
+        }
+        printf("\n");
+        printf("carry=%lu\n", carryout);
+		carryout = mpn_add_1(res+n+i, res+n+i, n-i, carryout);
+        for(int j = 0; j < n-i; j++){
+            printf("%lu ", res[n+i+j]);
+        }
+        printf("\n");
+	}
+
+	if (mpn_cmp(res+n, p, n) >= 0)
+	{
+		const mp_limb_t borrow = mpn_sub(res+n, res+n, n, p, n);
+	}
+
+	mpn_copyi(c, res+n, n);
 }
 
 int main(){
@@ -322,10 +392,12 @@ int main(){
     cudaMemcpy(c1, dev_c1, N * sizeof(int64_t), cudaMemcpyDeviceToHost);
     cudaMemcpy(c2, dev_c2, N * sizeof(int64_t), cudaMemcpyDeviceToHost);
 
+    uint64_t c3[6];
+    //mpz_mul(a, b, p, inv, c3);
     cmp = memcmp(c1, c2, N*sizeof(int64_t));
     if(cmp != 0){
         for(int i = 0; i < N; i++){
-            printf("(%lu,%lu) ", c1[i], c2[i]);
+            printf("(%lu,%lu, %lu) ", c1[i], c2[i], c3[i]);
         }
         printf("\n");
     }else{
