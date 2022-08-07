@@ -44,14 +44,14 @@ struct DevFp{
   inline __device__ DevFp squared(const env_t& bn_env, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
     device_mul_reduce(bn_env, res, mont, mont, modulus, tmp_buffer, inv);
     DevFp ret;
-    cgbn_load(bn_env, ret.mont, res + 8);
+    cgbn_load(bn_env, ret.mont, res + NUM);
     return ret;
   }
 
   inline __device__ DevFp mul(const env_t& bn_env, const DevFp& other, uint32_t *res, uint32_t* tmp_buffer, const env_t::cgbn_t& modulus, const uint64_t inv) const {
     device_mul_reduce(bn_env, res, mont, other.mont, modulus, tmp_buffer, inv);
     DevFp ret;
-    cgbn_load(bn_env, ret.mont, res + 8);
+    cgbn_load(bn_env, ret.mont, res + NUM);
     return ret;
 
   }

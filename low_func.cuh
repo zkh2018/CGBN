@@ -1040,7 +1040,7 @@ int mcl_bn128_g1_reduce_sum(
     ){
   cgbn_error_report_t *report = get_error_report();
 
-  uint32_t threads = 512;
+  uint32_t threads = TPI*64;
   const int local_instances = 64 * BlockDepth;
   uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
   dim3 blocks(block_x, ranges_size, 1);
@@ -1217,6 +1217,7 @@ void mcl_split_to_bucket(
 
   cgbn_error_report_t *report = get_error_report();
   blocks = (data_length + 63) / 64;
+  threads = TPI * 64;
   kernel_mcl_split_to_bucket<<<blocks, threads, 0, stream>>>(report, data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
 }
 
@@ -1485,8 +1486,8 @@ void mcl_bucket_reduce_sum(
       kernel_mcl_bucket_reduce_g1_test<local_instances><<<blocks, local_instances*TPI, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, bucket_num, t_zero, one, p, a, specialA_, mode_, rp); 
   }
 
-  threads = 512;
   int local_instances = 64;
+  threads = local_instances * TPI;
   blocks = (bucket_num + local_instances-1) / local_instances;
   kernel_mcl_copy<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, t_zero, bucket_num);
 }
@@ -1532,7 +1533,7 @@ __global__ void kernel_mcl_reverse(
 }
 
 void mcl_reverse(mcl_bn128_g1 in, mcl_bn128_g1 out, const int n, const int offset, CudaStream stream){
-  const int threads = 512;
+  const int threads = 64 * TPI;
   cgbn_error_report_t *report = get_error_report();
   int reverse_blocks = (n + 63) / 64;
   kernel_mcl_reverse<<<reverse_blocks, threads, 0, stream>>>(report, in, out, n, offset);
@@ -1725,7 +1726,7 @@ void mcl_prefix_sum(
     const uint64_t rp,
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
-  const int threads = 512;
+  const int threads = TPI * 64;
   int instances = threads / TPI;//64
   int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
   int prefix_sum_blocks2 = (prefix_sum_blocks + instances-1) / instances;//2^4
@@ -2882,7 +2883,7 @@ int mcl_bn128_g2_reduce_sum(
     ){
   cgbn_error_report_t *report = get_error_report();
 
-  uint32_t threads = 512;
+  uint32_t threads = TPI * 64;
   const int local_instances = 64 * BlockDepth;
   uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
   dim3 blocks(block_x, ranges_size, 1);
@@ -2974,6 +2975,7 @@ void mcl_split_to_bucket_g2(
 
   cgbn_error_report_t *report = get_error_report();
   blocks = (data_length + 63) / 64;
+  threads = TPI * 64;
   kernel_mcl_split_to_bucket_g2<<<blocks, threads, 0, stream>>>(report, data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
 }
 
@@ -3099,8 +3101,8 @@ void mcl_bucket_reduce_sum_g2(
     kernel_mcl_update_ends2<<<blocks, threads, 0, stream>>>(starts, half_sizes, ends, bucket_num);
     //CUDA_CHECK(cudaDeviceSynchronize());
   }
-  threads = 512;
   int local_instances = 64;
+  threads = local_instances * TPI;
   blocks = (bucket_num + local_instances-1) / local_instances;
   kernel_mcl_copy_g2<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, t_zero, bucket_num);
 }
@@ -3123,7 +3125,7 @@ __global__ void kernel_mcl_reverse_g2(
 }
 
 void mcl_reverse_g2(mcl_bn128_g2 in, mcl_bn128_g2 out, const int n, const int offset, CudaStream stream){
-  const int threads = 512;
+  const int threads = TPI * 64;
   cgbn_error_report_t *report = get_error_report();
   int reverse_blocks = (n + 63) / 64;
   kernel_mcl_reverse_g2<<<reverse_blocks, threads, 0, stream>>>(report, in, out, n, offset);
@@ -3319,7 +3321,7 @@ void mcl_prefix_sum_g2(
     const uint64_t rp,
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
-  const int threads = 512;
+  const int threads = TPI * 64;
   int instances = threads / TPI;//64
   int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
   int prefix_sum_blocks2 = (prefix_sum_blocks + instances-1) / instances;//2^4

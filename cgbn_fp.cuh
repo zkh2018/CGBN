@@ -362,10 +362,11 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
     uint64_t tmp_carry = *(uint64_t*)th;
     tmp_carry += carryout;
     uint32_t* p32 = (uint32_t*)&tmp_carry;
-    if(group_thread > 1) tmp_buffer[group_thread] = 0;
-    tmp_buffer[0] = p32[0];
-    tmp_buffer[1] = p32[1];
-    cgbn_load(bn_env, tb, tmp_buffer);      
+    //if(group_thread > 1) tmp_buffer[group_thread] = 0;
+    //tmp_buffer[0] = p32[0];
+    //tmp_buffer[1] = p32[1];
+    //cgbn_load(bn_env, tb, tmp_buffer);      
+    cgbn_set_ui32(bn_env, tb, p32[0], p32[1]);
     cgbn_add(bn_env, add_res, tres, tb);
     cgbn_store(bn_env, res+n+i, add_res);   
   }

@@ -7,9 +7,9 @@
 //#include "utility/cpu_simple_bn_math.h"
 #include "gpu_support.h"
 
-#define TPI 8
-typedef cgbn_context_t<TPI> context_t;
-typedef cgbn_env_t<context_t, BITS> env_t;
+//#define TPI 8
+//typedef cgbn_context_t<TPI> context_t;
+//typedef cgbn_env_t<context_t, BITS> env_t;
 
 namespace gpu{
 
