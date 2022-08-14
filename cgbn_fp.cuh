@@ -523,7 +523,7 @@ inline __device__ void device_mont_mul(uint64_t *wide_r, const uint64_t *modulus
 }
 
 inline __device__ void device_mul_wide(const uint64_t *a, const uint64_t *b, uint64_t *c){
-    limb_t r[12];
+    uint64_t r[12] = {0};
 
     asm(
       "{\n\t"
@@ -679,7 +679,7 @@ inline __device__ void dev_mont_mul(const uint64_t *a, const uint64_t *b, const 
 }
 
 inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, const env_t::cgbn_t& tmodule_data, uint32_t* tmp_buffer, const uint64_t inv){
-  const int group_thread = threadIdx.x & (TPI-1);
+  //const int group_thread = threadIdx.x & (TPI-1);
   env_t::cgbn_t tb, tres, add_res;                                             
   const int n = NUM;
   env_t::cgbn_wide_t tc;

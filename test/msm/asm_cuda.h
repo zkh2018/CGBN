@@ -87,32 +87,46 @@ __device__ static inline void mont_384(blst_fp ret, limb_t r[12], const blst_fp 
     limb_t k = r[0] * p_inv;
     limb_t cross_carry = 0;
 
+    // r = r + k * p
     asm(
       "{\n\t"
       ".reg .u64 c;\n\t"
       ".reg .u64 t;\n\t"
       ".reg .u64 nc;\n\t"
 
+        //c = k * p[0] + r[0]
       "mad.lo.cc.u64 c, %14, %8, %0;\n\t"
       "madc.hi.cc.u64 c, %14, %8, 0;\n\t"
       
+      // t = r[1] + c
       "addc.cc.u64 t, %1, c;\n\t"
+      // nc = carry
       "addc.u64 nc, 0, 0;\n\t"
+      // (r[1],c) = k * p[1] + (t, nc)
       "mad.lo.cc.u64 %1, %14, %9, t;\n\t"
       "madc.hi.cc.u64 c, %14, %9, nc;\n\t"
 
+        // t = r[2] + c
       "addc.cc.u64 t, %2, c;\n\t"
+      // nc = 0 + carry
       "addc.u64 nc, 0, 0;\n\t"
+      // (r[2],c) = k * p[2] + (t, nc)
       "mad.lo.cc.u64 %2, %14, %10, t;\n\t"
       "madc.hi.cc.u64 c, %14, %10, nc;\n\t"
 
+        // t = r[3] + c
       "addc.cc.u64 t, %3, c;\n\t"
+      // nc = carry
       "addc.u64 nc, 0, 0;\n\t"
+      //(r[3], c) = k * p[3] + (t, nc)
       "mad.lo.cc.u64 %3, %14, %11, t;\n\t"
       "madc.hi.cc.u64 c, %14, %11, nc;\n\t"
 
+        // t = r[4] + c
       "addc.cc.u64 t, %4, c;\n\t"
+      // nc = carry
       "addc.u64 nc, 0, 0;\n\t"
+      // r[4], c = k * p[4] + t,nc
       "mad.lo.cc.u64 %4, %14, %12, t;\n\t"
       "madc.hi.cc.u64 c, %14, %12, nc;\n\t"
 

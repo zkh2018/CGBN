@@ -35,15 +35,17 @@ template<class env>
 __device__ __forceinline__ uint32_t core_t<env>::get_ui32(const uint32_t a[LIMBS], const int index) {
   uint32_t sync=sync_mask();
   
-  return __shfl_sync(sync, a[0], index, TPI);
+  const int tid = index / LIMBS;
+  const int lim_id = index & (LIMBS-1);
+  return __shfl_sync(sync, a[lim_id], tid, TPI);
 }
 
 template<class env> 
 __device__ __forceinline__ void core_t<env>::get_ui64(const uint32_t a[LIMBS], uint32_t *ret, const int index) {
   uint32_t sync=sync_mask();
   
-  ret[0] = __shfl_sync(sync, a[0], index, TPI);
-  ret[1] = __shfl_sync(sync, a[0], index+1, TPI);
+  ret[0] = __shfl_sync(sync, a[(index & (LIMBS-1))], index/LIMBS, TPI);
+  ret[1] = __shfl_sync(sync, a[((index + 1) & (LIMBS-1))], (index+1)/LIMBS, TPI);
 }
 
 template<class env> 
@@ -61,16 +63,29 @@ __device__ __forceinline__ void core_t<env>::set_ui32(uint32_t r[LIMBS], const u
 
   //r[0]=(group_thread==0) ? value : 0;
   //r[0]=(group_thread==1) ? value2 : 0;
-  if(group_thread == 0){
-    r[0] = value;
-  }else if(group_thread == 1){
-    r[0] = value2;
+  if(LIMBS == 1){
+      if(group_thread == 0){
+          r[0] = value;
+      }else if(group_thread == 1){
+          r[0] = value2;
+      }else{
+          r[0] = 0;
+      }
+#pragma unroll
+      for(int32_t index=1;index<LIMBS;index++)
+          r[index]=0;
   }else{
-    r[0] = 0;
+    if(group_thread == 0){
+        r[0] = value;
+        r[1] = value2;
+    }else{
+        r[0] = 0; r[1] = 0;
+    }
+#pragma unroll
+    for(int32_t index = 2; index < LIMBS; index++){
+        r[index] = 0;
+    }
   }
-  #pragma unroll
-  for(int32_t index=1;index<LIMBS;index++)
-    r[index]=0;
 }
 
 template<class env>
