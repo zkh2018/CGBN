@@ -17,55 +17,68 @@ __global__ void kernel_msm_mul(
       ".reg .u64 c;\n\t"
       ".reg .u64 nc;\n\t"
       ".reg .u64 t;\n\t"
-      
+      //r[0], c = a[0] * b[0] 
       "mad.lo.cc.u64 %0, %12, %18, 0;\n\t"
       "madc.hi.cc.u64 c, %12, %18, 0;\n\t"
       
+      //r[1], c = a[0] * b[1] + c
       "madc.lo.cc.u64 %1, %12, %19, c;\n\t"
       "madc.hi.cc.u64 c, %12, %19, 0;\n\t"
-
+    
+      //r[2], c = a[0] * b[2] + c
       "madc.lo.cc.u64 %2, %12, %20, c;\n\t"
       "madc.hi.cc.u64 c, %12, %20, 0;\n\t"
 
+      //r[3], c = a[0] * b[3] + c
       "madc.lo.cc.u64 %3, %12, %21, c;\n\t"
       "madc.hi.cc.u64 c, %12, %21, 0;\n\t"
 
+      //r[4], c = a[0] * b[4] + c
       "madc.lo.cc.u64 %4, %12, %22, c;\n\t"
       "madc.hi.cc.u64 c, %12, %22, 0;\n\t"
 
+      //r[5], c = a[0] * b[5] + c
       "madc.lo.cc.u64 %5, %12, %23, c;\n\t"
       "madc.hi.u64 %6, %12, %23, 0;\n\t"
 
 
+      //r[1], c = a[1] * b[0] + c
       "mad.lo.cc.u64 %1, %13, %18, %1;\n\t"
       "madc.hi.cc.u64 c, %13, %18, 0;\n\t"
       
+      //t = r[2] + c
       "addc.cc.u64 t, %2, c;\n\t"
       "addc.u64 nc, 0, 0;\n\t"
+      //r[2], c = a[1] * b[1] + c
       "mad.lo.cc.u64 %2, %13, %19, t;\n\t"
       "madc.hi.cc.u64 c, %13, %19, nc;\n\t"
 
       "addc.cc.u64 t, %3, c;\n\t"
       "addc.u64 nc, 0, 0;\n\t"
+      //r[3], c = a[1] * b[2] + c
       "mad.lo.cc.u64 %3, %13, %20, t;\n\t"
       "madc.hi.cc.u64 c, %13, %20, nc;\n\t"
 
       "addc.cc.u64 t, %4, c;\n\t"
       "addc.u64 nc, 0, 0;\n\t"
+      //r[4], c = a[1] * b[3] + c
       "mad.lo.cc.u64 %4, %13, %21, t;\n\t"
       "madc.hi.cc.u64 c, %13, %21, nc;\n\t"
 
       "addc.cc.u64 t, %5, c;\n\t"
       "addc.u64 nc, 0, 0;\n\t"
+      //r[5], c = a[1] * b[4] + c
       "mad.lo.cc.u64 %5, %13, %22, t;\n\t"
       "madc.hi.cc.u64 c, %13, %22, nc;\n\t"
 
       "addc.cc.u64 t, %6, c;\n\t"
       "addc.u64 nc, 0, 0;\n\t"
+      //r[6], c = a[1] * b[5] + c
       "mad.lo.cc.u64 %6, %13, %23, t;\n\t"
       "madc.hi.u64 %7, %13, %23, nc;\n\t"
 
 
+      //r[2], c = a[2] * b[0] + c
       "mad.lo.cc.u64 %2, %14, %18, %2;\n\t"
       "madc.hi.cc.u64 c, %14, %18, 0;\n\t"
       
@@ -251,49 +264,57 @@ __global__ void kernel_cgbn_mont_mul(
   env_t          bn_env(bn_context.env<env_t>());  
 
 
-  //__shared__ uint32_t res[NUM * 3], buffer[NUM];
+  __shared__ uint32_t res[NUM * 3], buffer[NUM];
   
   DevFp dev_a, dev_b, dev_c, dev_p;
   cgbn_load(bn_env, dev_a.mont, a);
   cgbn_load(bn_env, dev_b.mont, b);
   cgbn_load(bn_env, dev_p.mont, p);
-  //dev_c = dev_a.mul(bn_env, dev_b, res, buffer, dev_p.mont, inv);
+  dev_c = dev_a.mul(bn_env, dev_b, res, buffer, dev_p.mont, inv);
+  cgbn_store(bn_env, c, dev_c.mont);
+
   //uint32_t np0=cgbn_bn2mont(bn_env, dev_a.mont, dev_a.mont, dev_p.mont);
   //cgbn_bn2mont(bn_env, dev_b.mont, dev_b.mont, dev_p.mont);
   //cgbn_mont_mul(bn_env, dev_c.mont, dev_a.mont, dev_b.mont, dev_p.mont, np0);
   //cgbn_mont2bn(bn_env, dev_c.mont, dev_c.mont, dev_p.mont, np0);
-  env_t::cgbn_wide_t tc;
-  cgbn_mul_wide(bn_env, tc, dev_a.mont, dev_b.mont);
-  __shared__ uint32_t cache_c[24];
-  __shared__ uint32_t cache_cc[12];
-  cgbn_store(bn_env, cache_c, tc._low);
-  cgbn_store(bn_env, cache_c + 12, tc._high);
-  if(threadIdx.x == 0){
-      mont_384((limb_t*)cache_cc, (limb_t*)cache_c, (limb_t*)p, (limb_t)inv, false); 
-      //uint64_t* c64 = (uint64_t *)c;
-      //c64[0] = ((uint64_t*)cache_cc)[0];
-      //c64[1] = ((uint64_t*)cache_cc)[1];
-      //c64[2] = ((uint64_t*)cache_cc)[2];
-      //c64[3] = ((uint64_t*)cache_cc)[3];
-      //c64[4] = ((uint64_t*)cache_cc)[4];
-      //c64[5] = ((uint64_t*)cache_cc)[5];
-  }
-  ///__syncthreads();
-  //c[threadIdx.x] = cache_cc[threadIdx.x];
-  cgbn_load(bn_env, dev_c.mont, cache_cc);
-  if(cgbn_compare(bn_env, dev_c.mont, dev_p.mont) >= 0){
-    cgbn_sub(bn_env, tc._low, dev_c.mont, dev_p.mont);
-    cgbn_store(bn_env, c, tc._low);
-  }else{
-    cgbn_store(bn_env, c, dev_c.mont);
-  }
 
-  //cgbn_store(bn_env, c, dev_c.mont);
+  
+  //env_t::cgbn_wide_t tc;
+  //cgbn_mul_wide(bn_env, tc, dev_a.mont, dev_b.mont);
+  //__shared__ uint32_t cache_c[24];
+  //__shared__ uint32_t cache_cc[12];
+  //cgbn_store(bn_env, cache_c, tc._low);
+  //cgbn_store(bn_env, cache_c + 12, tc._high);
+  //if(threadIdx.x == 0){
+  //    mont_384((limb_t*)cache_cc, (limb_t*)cache_c, (limb_t*)p, (limb_t)inv, false); 
+  //    //uint64_t* c64 = (uint64_t *)c;
+  //    //c64[0] = ((uint64_t*)cache_cc)[0];
+  //    //c64[1] = ((uint64_t*)cache_cc)[1];
+  //    //c64[2] = ((uint64_t*)cache_cc)[2];
+  //    //c64[3] = ((uint64_t*)cache_cc)[3];
+  //    //c64[4] = ((uint64_t*)cache_cc)[4];
+  //    //c64[5] = ((uint64_t*)cache_cc)[5];
+  //}
+  /////__syncthreads();
+  ////c[threadIdx.x] = cache_cc[threadIdx.x];
+  //cgbn_load(bn_env, dev_c.mont, cache_cc);
+  //if(cgbn_compare(bn_env, dev_c.mont, dev_p.mont) >= 0){
+  //  cgbn_sub(bn_env, tc._low, dev_c.mont, dev_p.mont);
+  //  cgbn_store(bn_env, c, tc._low);
+  //}else{
+  //  cgbn_store(bn_env, c, dev_c.mont);
+  //}
+
 }
 
-void mpz_mul(mp_limb_t a[6], mp_limb_t b[6], mp_limb_t p[6], mp_limb_t inv, mp_limb_t c[6]){
+__global__ void kernel_cgbn_mont_mul2(
+    uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *p, uint64_t inv){
+   dev_mont_mul((uint64_t*)a, (uint64_t*)b, (uint64_t*)p, inv, (uint64_t*)c);  
+}
+
+void mpz_mul(mp_limb_t a[4], mp_limb_t b[4], mp_limb_t p[4], mp_limb_t inv, mp_limb_t c[4]){
 printf("\n");
-    const int n = 6;
+    const int n = 4;
 	mp_limb_t res[2*n];
 	mpn_mul_n(res, a, b, n);
 	/*
@@ -339,11 +360,11 @@ printf("\n");
 }
 
 int main(){
-    const int N = 6;
+    const int N = 4;
     uint64_t a[N], b[N], c1[N*2], c2[N*2];
-    uint64_t p[6] = {
+    uint64_t p[4] = {
       TO_LIMB_T(0x8508c00000000001), TO_LIMB_T(0x170b5d4430000000),
-        TO_LIMB_T(0x1ef3622fba094800), TO_LIMB_T(0x1a22d9f300f5138f),
+        //TO_LIMB_T(0x1ef3622fba094800), TO_LIMB_T(0x1a22d9f300f5138f),
           TO_LIMB_T(0xc63b05c06ca1493b), TO_LIMB_T(0x1ae3a4617c510ea)
     };
     for(int i = 0; i < N; i++){
@@ -374,27 +395,29 @@ int main(){
     cudaMemcpy(c1, dev_c1, 2*N * sizeof(int64_t), cudaMemcpyDeviceToHost);
     cudaMemcpy(c2, dev_c2, 2*N * sizeof(int64_t), cudaMemcpyDeviceToHost);
 
-    int cmp = memcmp(c1, c2, 2*N*sizeof(int64_t));
-    if(cmp != 0){
-        for(int i = 0; i < 2*N; i++){
-            printf("(%lu,%lu) ", c1[i], c2[i]);
-        }
-        printf("\n");
-    }else{
-        printf("compare success\n");
-    }
+    //int cmp = memcmp(c1, c2, 2*N*sizeof(int64_t));
+    //if(cmp != 0){
+    //    for(int i = 0; i < 2*N; i++){
+    //        printf("(%lu,%lu) ", c1[i], c2[i]);
+    //    }
+    //    printf("\n");
+    //}else{
+    //    printf("compare success\n");
+    //}
+
+    //for(int i = 0; i < iters; i++)
+    //    kernel_msm_mont_mul<<<1, 1>>>(dev_a, dev_b, dev_c1, dev_p, inv);
 
     for(int i = 0; i < iters; i++)
-        kernel_msm_mont_mul<<<1, 1>>>(dev_a, dev_b, dev_c1, dev_p, inv);
-    for(int i = 0; i < iters; i++)
-        kernel_cgbn_mont_mul<<<1, TPI>>>(report, (uint32_t*)dev_a, (uint32_t*)dev_b, (uint32_t*)dev_c2, (uint32_t*)dev_p, inv);
+        //kernel_cgbn_mont_mul<<<1, TPI>>>(report, (uint32_t*)dev_a, (uint32_t*)dev_b, (uint32_t*)dev_c2, (uint32_t*)dev_p, inv);
+        kernel_cgbn_mont_mul2<<<1, 1>>>((uint32_t*)dev_a, (uint32_t*)dev_b, (uint32_t*)dev_c2, (uint32_t*)dev_p, inv);
 
     cudaMemcpy(c1, dev_c1, N * sizeof(int64_t), cudaMemcpyDeviceToHost);
     cudaMemcpy(c2, dev_c2, N * sizeof(int64_t), cudaMemcpyDeviceToHost);
 
-    uint64_t c3[6];
-    //mpz_mul(a, b, p, inv, c3);
-    cmp = memcmp(c1, c2, N*sizeof(int64_t));
+    uint64_t c3[4];
+    mpz_mul(a, b, p, inv, c3);
+    int cmp = memcmp(c3, c2, N*sizeof(int64_t));
     if(cmp != 0){
         for(int i = 0; i < N; i++){
             printf("(%lu,%lu, %lu) ", c1[i], c2[i], c3[i]);
