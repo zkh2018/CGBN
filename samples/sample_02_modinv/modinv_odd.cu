@@ -41,9 +41,9 @@ IN THE SOFTWARE.
  ************************************************************************************************/
 
 // IMPORTANT:  DO NOT DEFINE TPI OR BITS BEFORE INCLUDING CGBN
-#define TPI 32
-#define BITS 1024
-#define INSTANCES 100000
+#define TPI 1
+#define BITS 256
+#define INSTANCES 100
 
 // Declare the instance type
 typedef struct {

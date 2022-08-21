@@ -57,9 +57,9 @@ IN THE SOFTWARE.
  ************************************************************************************************/
  
 // IMPORTANT:  DO NOT DEFINE TPI OR BITS BEFORE INCLUDING CGBN
-#define TPI 32
-#define BITS 1024
-#define INSTANCES 100000
+#define TPI 1
+#define BITS 256
+#define INSTANCES 100
 
 // Declare the instance type
 typedef struct {
@@ -109,10 +109,14 @@ __global__ void kernel_add(cgbn_error_report_t *report, instance_t *instances, u
   context_t      bn_context(cgbn_report_monitor, report, instance);   // construct a context
   env_t          bn_env(bn_context.env<env_t>());                     // construct an environment for 1024-bit math
   env_t::cgbn_t  a, b, r;                                             // define a, b, r as 1024-bit bignums
+  env_t::cgbn_wide_t c;
 
   cgbn_load(bn_env, a, &(instances[instance].a));      // load my instance's a value
   cgbn_load(bn_env, b, &(instances[instance].b));      // load my instance's b value
   cgbn_add(bn_env, r, a, b);                           // r=a+b
+  cgbn_mul_wide(bn_env, c, a, b);                           // r=a+b
+  cgbn_mul(bn_env, r, a, b);                           // r=a+b
+  cgbn_sub(bn_env, a, r, b);                           // r=a+b
   cgbn_store(bn_env, &(instances[instance].sum), r);   // store r into sum
 }
 

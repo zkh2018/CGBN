@@ -2,9 +2,17 @@
 #define CGBN_FP_CUH
 
 #include "cgbn_math.h"
+#include <cooperative_groups.h>
+namespace cg = cooperative_groups;
 
 namespace gpu{
 
+inline __device__ uint32_t sync_mask(){
+    uint32_t group_thread=threadIdx.x & TPI-1, warp_thread=threadIdx.x & 31;
+    const uint32_t TPI_ONES=(1ull<<TPI)-1;
+
+    return TPI_ONES<<(group_thread ^ warp_thread);
+}
 
 inline __device__ void device_fp_add(const env_t& bn_env, cgbn_mem_t<BITS>* const in1, cgbn_mem_t<BITS>* const in2, cgbn_mem_t<BITS>* module_data, cgbn_mem_t<BITS>* max_value){
   env_t::cgbn_t tin1, tin2, tmodule_data, tscratch;
@@ -338,6 +346,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
 inline __device__ void device_mont_mul(uint64_t *wide_r, const uint64_t *modulus, const uint64_t inv){
     uint64_t k = wide_r[0] * inv;
     uint64_t carry = 0;
+
     asm(
       "{\n\t"
       ".reg .u64 c;\n\t"
@@ -680,14 +689,15 @@ inline __device__ void dev_mont_mul(const uint64_t *a, const uint64_t *b, const 
 
 inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, const env_t::cgbn_t& tin1, const env_t::cgbn_t& tin2, const env_t::cgbn_t& tmodule_data, uint32_t* tmp_buffer, const uint64_t inv){
   //const int group_thread = threadIdx.x & (TPI-1);
-  env_t::cgbn_t tb, tres, add_res;                                             
+  cg::thread_group tg = cg::tiled_partition(cg::this_thread_block(), TPI);
   const int n = NUM;
   env_t::cgbn_wide_t tc;
   cgbn_mul_wide(bn_env, tc, tin1, tin2);
   cgbn_store(bn_env, res, tc._low);
   cgbn_store(bn_env, res + n, tc._high);
 
-#if true 
+#if false
+  env_t::cgbn_t tb, tres, add_res;                                             
   for(int i = 0; i < n; i+=2){
     cgbn_load(bn_env, tres, res+i);
     uint64_t *p64 = (uint64_t*)(res+i);
@@ -744,20 +754,27 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
 
   }
 
-#else
-  cgbn_store(bn_env, tmp_buffer, tmodule_data);
-  if(group_thread == 0){
-    uint64_t *p64_res = (uint64_t*)(res);
-    uint64_t *p64_buf = (uint64_t*)(tmp_buffer);
-    device_mont_mul(p64_res, p64_buf, inv);
-  }
-#endif
-
   cgbn_load(bn_env, tres, res+n);
   if(cgbn_compare(bn_env, tres, tmodule_data) >= 0){
     cgbn_sub(bn_env, add_res, tres, tmodule_data);
     cgbn_store(bn_env, res+n, add_res);
   }
+#else
+  cgbn_store(bn_env, tmp_buffer, tmodule_data);
+  tg.sync();
+  if((threadIdx.x & TPI-1) == 0){
+    uint64_t *p64_res = (uint64_t*)(res);
+    uint64_t *p64_buf = (uint64_t*)(tmp_buffer);
+    device_mont_mul(p64_res, p64_buf, inv);
+    if(dev_is_ge(p64_res + 4, p64_buf)){
+        uint64_t sub[4];
+        dev_sub_mod(p64_res + 4, p64_buf, sub);
+        memcpy(p64_res+4, sub, 4 * sizeof(uint64_t));
+    }
+  }
+  tg.sync();
+#endif
+
 }
 
 inline __device__ void device_squared(const env_t& bn_env, const Fp_model& x, uint32_t *res, cgbn_mem_t<BITS>* tmp_buffer, const int offset, cgbn_mem_t<BITS>* modulus, const uint64_t inv){

@@ -8,6 +8,8 @@
 
 using namespace gpu;
 
+const int N = 4;
+
 __global__ void kernel_msm_mul(
     uint64_t *a, uint64_t *b, uint64_t *c){
     limb_t r[12];
@@ -278,33 +280,33 @@ __global__ void kernel_cgbn_mont_mul(
   //cgbn_mont_mul(bn_env, dev_c.mont, dev_a.mont, dev_b.mont, dev_p.mont, np0);
   //cgbn_mont2bn(bn_env, dev_c.mont, dev_c.mont, dev_p.mont, np0);
 
-  
-  //env_t::cgbn_wide_t tc;
-  //cgbn_mul_wide(bn_env, tc, dev_a.mont, dev_b.mont);
-  //__shared__ uint32_t cache_c[24];
-  //__shared__ uint32_t cache_cc[12];
-  //cgbn_store(bn_env, cache_c, tc._low);
-  //cgbn_store(bn_env, cache_c + 12, tc._high);
-  //if(threadIdx.x == 0){
-  //    mont_384((limb_t*)cache_cc, (limb_t*)cache_c, (limb_t*)p, (limb_t)inv, false); 
-  //    //uint64_t* c64 = (uint64_t *)c;
-  //    //c64[0] = ((uint64_t*)cache_cc)[0];
-  //    //c64[1] = ((uint64_t*)cache_cc)[1];
-  //    //c64[2] = ((uint64_t*)cache_cc)[2];
-  //    //c64[3] = ((uint64_t*)cache_cc)[3];
-  //    //c64[4] = ((uint64_t*)cache_cc)[4];
-  //    //c64[5] = ((uint64_t*)cache_cc)[5];
-  //}
-  /////__syncthreads();
-  ////c[threadIdx.x] = cache_cc[threadIdx.x];
-  //cgbn_load(bn_env, dev_c.mont, cache_cc);
-  //if(cgbn_compare(bn_env, dev_c.mont, dev_p.mont) >= 0){
-  //  cgbn_sub(bn_env, tc._low, dev_c.mont, dev_p.mont);
-  //  cgbn_store(bn_env, c, tc._low);
-  //}else{
-  //  cgbn_store(bn_env, c, dev_c.mont);
-  //}
-
+ /* 
+  env_t::cgbn_wide_t tc;
+  cgbn_mul_wide(bn_env, tc, dev_a.mont, dev_b.mont);
+  __shared__ uint32_t cache_c[24];
+  __shared__ uint32_t cache_cc[12];
+  cgbn_store(bn_env, cache_c, tc._low);
+  cgbn_store(bn_env, cache_c + 12, tc._high);
+  if(threadIdx.x == 0){
+      mont_384((limb_t*)cache_cc, (limb_t*)cache_c, (limb_t*)p, (limb_t)inv, false); 
+      //uint64_t* c64 = (uint64_t *)c;
+      //c64[0] = ((uint64_t*)cache_cc)[0];
+      //c64[1] = ((uint64_t*)cache_cc)[1];
+      //c64[2] = ((uint64_t*)cache_cc)[2];
+      //c64[3] = ((uint64_t*)cache_cc)[3];
+      //c64[4] = ((uint64_t*)cache_cc)[4];
+      //c64[5] = ((uint64_t*)cache_cc)[5];
+  }
+  ///__syncthreads();
+  //c[threadIdx.x] = cache_cc[threadIdx.x];
+  cgbn_load(bn_env, dev_c.mont, cache_cc);
+  if(cgbn_compare(bn_env, dev_c.mont, dev_p.mont) >= 0){
+    cgbn_sub(bn_env, tc._low, dev_c.mont, dev_p.mont);
+    cgbn_store(bn_env, c, tc._low);
+  }else{
+    cgbn_store(bn_env, c, dev_c.mont);
+  }
+*/
 }
 
 __global__ void kernel_cgbn_mont_mul2(
@@ -312,9 +314,8 @@ __global__ void kernel_cgbn_mont_mul2(
    dev_mont_mul((uint64_t*)a, (uint64_t*)b, (uint64_t*)p, inv, (uint64_t*)c);  
 }
 
-void mpz_mul(mp_limb_t a[4], mp_limb_t b[4], mp_limb_t p[4], mp_limb_t inv, mp_limb_t c[4]){
-printf("\n");
-    const int n = 4;
+void mpz_mul(mp_limb_t a[N], mp_limb_t b[N], mp_limb_t p[N], mp_limb_t inv, mp_limb_t c[N]){
+    const int n = N;
 	mp_limb_t res[2*n];
 	mpn_mul_n(res, a, b, n);
 	/*
@@ -326,29 +327,29 @@ printf("\n");
 	for (size_t i = 0; i < n; ++i)
 	{
 		mp_limb_t k = inv * res[i];
-        printf("k = %lu\n", k);
+        //printf("k = %lu\n", k);
 		/* calculate res = res + k * mod * b^i */
 		//mp_limb_t carryout = mpn_addmul_1(res+i, p, n, k);
         mp_limb_t tmp[n];
         mp_limb_t carry1 = mpn_mul_1(tmp, p, n, k);
-        printf("mul_1 %lu %u %u:", carry1, (uint32_t)carry1, (carry1>>32));
-        for(int j = 0; j < n; j++){
-            printf("%lu ", tmp[j]);
-        }
-        printf("\n");
+        //printf("mul_1 %lu %u %u:", carry1, (uint32_t)carry1, (carry1>>32));
+        //for(int j = 0; j < n; j++){
+        //    printf("%lu ", tmp[j]);
+        //}
+        //printf("\n");
         mp_limb_t carry2 = mpn_add_n(res+i, res+i, tmp, n);
         mp_limb_t carryout = carry1+carry2;
-        printf("add %lu:", carry2);
-        for(int j = 0; j < n; j++){
-            printf("%lu ", res[i+j]);
-        }
-        printf("\n");
-        printf("carry=%lu\n", carryout);
+        //printf("add %lu:", carry2);
+        //for(int j = 0; j < n; j++){
+        //    printf("%lu ", res[i+j]);
+        //}
+        //printf("\n");
+        //printf("carry=%lu\n", carryout);
 		carryout = mpn_add_1(res+n+i, res+n+i, n-i, carryout);
-        for(int j = 0; j < n-i; j++){
-            printf("%lu ", res[n+i+j]);
-        }
-        printf("\n");
+        //for(int j = 0; j < n-i; j++){
+        //    printf("%lu ", res[n+i+j]);
+        //}
+        //printf("\n");
 	}
 
 	if (mpn_cmp(res+n, p, n) >= 0)
@@ -360,9 +361,9 @@ printf("\n");
 }
 
 int main(){
-    const int N = 4;
+    //const int N = 6;
     uint64_t a[N], b[N], c1[N*2], c2[N*2];
-    uint64_t p[4] = {
+    uint64_t p[N] = {
       TO_LIMB_T(0x8508c00000000001), TO_LIMB_T(0x170b5d4430000000),
         //TO_LIMB_T(0x1ef3622fba094800), TO_LIMB_T(0x1a22d9f300f5138f),
           TO_LIMB_T(0xc63b05c06ca1493b), TO_LIMB_T(0x1ae3a4617c510ea)
@@ -409,13 +410,13 @@ int main(){
     //    kernel_msm_mont_mul<<<1, 1>>>(dev_a, dev_b, dev_c1, dev_p, inv);
 
     for(int i = 0; i < iters; i++)
-        //kernel_cgbn_mont_mul<<<1, TPI>>>(report, (uint32_t*)dev_a, (uint32_t*)dev_b, (uint32_t*)dev_c2, (uint32_t*)dev_p, inv);
-        kernel_cgbn_mont_mul2<<<1, 1>>>((uint32_t*)dev_a, (uint32_t*)dev_b, (uint32_t*)dev_c2, (uint32_t*)dev_p, inv);
+        kernel_cgbn_mont_mul<<<1, 1>>>(report, (uint32_t*)dev_a, (uint32_t*)dev_b, (uint32_t*)dev_c2, (uint32_t*)dev_p, inv);
+        //kernel_cgbn_mont_mul2<<<1, 1>>>((uint32_t*)dev_a, (uint32_t*)dev_b, (uint32_t*)dev_c2, (uint32_t*)dev_p, inv);
 
     cudaMemcpy(c1, dev_c1, N * sizeof(int64_t), cudaMemcpyDeviceToHost);
     cudaMemcpy(c2, dev_c2, N * sizeof(int64_t), cudaMemcpyDeviceToHost);
 
-    uint64_t c3[4];
+    uint64_t c3[N];
     mpz_mul(a, b, p, inv, c3);
     int cmp = memcmp(c3, c2, N*sizeof(int64_t));
     if(cmp != 0){
