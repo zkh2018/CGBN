@@ -762,7 +762,8 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
 #else
   cgbn_store(bn_env, tmp_buffer, tmodule_data);
   tg.sync();
-  if((threadIdx.x & TPI-1) == 0){
+  //if((threadIdx.x & TPI-1) == 0){
+  if(tg.thread_rank() == 0){
     uint64_t *p64_res = (uint64_t*)(res);
     uint64_t *p64_buf = (uint64_t*)(tmp_buffer);
     device_mont_mul(p64_res, p64_buf, inv);
