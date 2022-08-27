@@ -696,7 +696,7 @@ inline __device__ void device_mul_reduce(const env_t& bn_env, uint32_t* res, con
   cgbn_store(bn_env, res, tc._low);
   cgbn_store(bn_env, res + n, tc._high);
 
-#if false
+#if true
   env_t::cgbn_t tb, tres, add_res;                                             
   for(int i = 0; i < n; i+=2){
     cgbn_load(bn_env, tres, res+i);
