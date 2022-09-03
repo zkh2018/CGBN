@@ -997,12 +997,12 @@ inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(
     dev_mcl_sqr_g2(R.x, p, rp, H3);
 
     dev_mcl_mul_g2(R.z, R.x, p, rp, R.z);
-    printInt256(R.z.c0, "R.z.c0");
+    //printInt256(R.z.c0, "R.z.c0");
     dev_mcl_mul_g2(U1, H3, p, rp, U1);
 
     //dev_mcl_mul_g2(r, r, p, rp, R.y);
     dev_mcl_sqr_g2(r, p, rp, R.y);
-    printInt256(R.z.c0, "R.z.c0");
+    //printInt256(R.z.c0, "R.z.c0");
 
     dev_mcl_mul_g2(H3, R.x, p, rp, H3);
 

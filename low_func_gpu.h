@@ -162,7 +162,7 @@ int mcl_bn128_g2_reduce_sum_new(
     cgbn_mem_t<BITS>* bn_exponents,
     cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
     Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int mode_, const uint64_t rp,
-    const int max_reduce_depth, cudaStream_t stream);
+    const int max_reduce_depth, const int values_size, cudaStream_t stream);
 
 
 void mcl_split_to_bucket_g2(

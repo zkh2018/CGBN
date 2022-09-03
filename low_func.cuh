@@ -821,22 +821,65 @@ __global__ void kernel_reduce_sum_pre_new(
     cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv){
     int tid = threadIdx.x + blockDim.x * blockIdx.x;
     using BigInt256::Int;
-    Int* loal_zero = (Int*)field_zero.mont_repr_data;
-    Int* loal_one = (Int*)field_one.mont_repr_data;
+    Int* local_zero = (Int*)field_zero.mont_repr_data;
+    Int* local_one = (Int*)field_one.mont_repr_data;
     for(int i = tid; i < n; i+=gridDim.x * blockDim.x){
         Int *scalar = (Int*)(scalars.mont_repr_data + i);
-        if(dev_is_eq(scalar, local_zero){
+        if(BigInt256::dev_equal(scalar, local_zero)){
         }
-        else if(dev_is_eq(scalar, local_one){
+        else if(BigInt256::dev_equal(scalar, local_one)){
             flags[i] = 1;
         }else{
             density[i] = 1;
-            Int res[[N];
-            dev_as_bigint(scalar, (Int*)field_modulus, field_inv, res);
-            memcpy(bn_exponents + i, res, N*sizeof(Int));
+            Int res[BigInt256::N];
+            BigInt256::dev_as_bigint(scalar, (Int*)field_modulus, field_inv, res);
+            memcpy(bn_exponents + i, res, BigInt256::N*sizeof(Int));
         }
     }
 }
+
+__global__ void kernel_mcl_bn128_g1_reduce_sum_pre_new(
+    const Fp_model scalars,
+    const size_t *index_it,
+    uint32_t* counters, 
+    char* flags,
+    const int ranges_size, 
+    const uint32_t* firsts,
+    const uint32_t* seconds,
+    const Fp_model field_zero,
+    const Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv
+    ){
+  int instance = blockIdx.x * blockDim.x + threadIdx.x;
+
+  int range_offset = blockIdx.y * gridDim.x * blockDim.x;
+  int first = firsts[blockIdx.y];
+  int second = seconds[blockIdx.y];
+  int reduce_depth = second - first;//30130
+  using namespace BigInt256;
+  Int* local_zero = (Int*)field_zero.mont_repr_data;
+  Int* local_one = (Int*)field_one.mont_repr_data;
+
+  for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * blockDim.x){
+    const int j = index_it[i];
+    Int *scalar = (Int*)(scalars.mont_repr_data + j);
+    if(BigInt256::dev_equal(scalar, local_zero)){
+    }
+    else if(BigInt256::dev_equal(scalar, local_one)){
+      flags[j] = 1;
+    }
+    else{
+        density[i] = 1;
+        Int res[N];
+      dev_as_bigint(scalar, (Int*)field_modulus, field_inv, res);
+      //a.store(bn_env, bn_exponents, i);
+      memcpy(bn_exponents + i, res, N*sizeof(Int));
+    }
+  }
+}
+
 
 
 template<int BlockInstances>
@@ -2807,14 +2850,6 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum(
     }
   }
   store(bn_env, partial, result, offset + instance);
-  if(blockIdx.y == 0 && instance == 0){
-    print64(bn_env, result.x.c0.mont);
-    print64(bn_env, result.x.c1.mont);
-    print64(bn_env, result.y.c0.mont);
-    print64(bn_env, result.y.c1.mont);
-    print64(bn_env, result.z.c0.mont);
-    print64(bn_env, result.z.c1.mont);
-  }
 }
 
 inline __device__ void printInt256(const BigInt256::Int256 x){
@@ -3047,11 +3082,19 @@ int mcl_bn128_g2_reduce_sum(
     ){
   cgbn_error_report_t *report = get_error_report();
 
-  uint32_t threads = TPI * 64;
-  const int local_instances = 64 * BlockDepth;
-  uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
-  dim3 blocks(block_x, ranges_size, 1);
-  kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+  if(true){
+      uint32_t threads = TPI * 64;
+      const int local_instances = 64 * BlockDepth;
+      uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
+      dim3 blocks(block_x, ranges_size, 1);
+      kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+  }else{
+      uint32_t threads = 64;
+      const int local_instances = 64 * BlockDepth;
+      uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
+      dim3 blocks(block_x, ranges_size, 1);
+      kernel_mcl_bn128_g1_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+  }
 
 /*
   int n = max_reduce_depth;
@@ -3111,15 +3154,22 @@ int mcl_bn128_g2_reduce_sum_new(
     cgbn_mem_t<BITS>* bn_exponents,
     cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv,
     const Fp_model one, const Fp_model p, const Fp_model2 a, const int specialA_, const int mode_, const uint64_t rp,
-    const int max_reduce_depth, cudaStream_t stream
+    const int max_reduce_depth, const int values_size, cudaStream_t stream
     ){
   cgbn_error_report_t *report = get_error_report();
 
-  uint32_t threads = TPI * 64;
-  const int local_instances = 64 * BlockDepth;
-  uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
-  dim3 blocks(block_x, ranges_size, 1);
-  kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+  if(true){
+      uint32_t threads = 64;//TPI * 64;
+      const int local_instances = 64 * BlockDepth;
+      uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
+      dim3 blocks(block_x, ranges_size, 1);
+      kernel_mcl_bn128_g1_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+      //kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+  }else{
+      int threads = 256;
+      int blocks = (values_size + threads - 1) / threads;
+      kernel_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, flags, field_zero, field_one, values_size, density, bn_exponents, field_modulus, field_inv);
+  }
 
   const int blocks_per_range = REDUCE_BLOCKS_PER_RANGE;
   const int threads_per_block = INSTANCES_PER_BLOCK;
