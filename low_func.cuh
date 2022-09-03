@@ -8,6 +8,7 @@
 #include "cgbn_ect.h"
 #include <stdint.h>
 #include <thrust/scan.h>
+#include "bigint_256.cuh"
 
 namespace gpu{
 
@@ -808,6 +809,35 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_pre(
     }
   }
 }
+
+__global__ void kernel_reduce_sum_pre_new(
+    const Fp_model scalars,
+    char* flags,
+    const Fp_model field_zero,
+    const Fp_model field_one,
+    const int n,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv){
+    int tid = threadIdx.x + blockDim.x * blockIdx.x;
+    using BigInt256::Int;
+    Int* loal_zero = (Int*)field_zero.mont_repr_data;
+    Int* loal_one = (Int*)field_one.mont_repr_data;
+    for(int i = tid; i < n; i+=gridDim.x * blockDim.x){
+        Int *scalar = (Int*)(scalars.mont_repr_data + i);
+        if(dev_is_eq(scalar, local_zero){
+        }
+        else if(dev_is_eq(scalar, local_one){
+            flags[i] = 1;
+        }else{
+            density[i] = 1;
+            Int res[[N];
+            dev_as_bigint(scalar, (Int*)field_modulus, field_inv, res);
+            memcpy(bn_exponents + i, res, N*sizeof(Int));
+        }
+    }
+}
+
 
 template<int BlockInstances>
 __global__ void kernel_mcl_bn128_g1_reduce_sum_one_range5(
@@ -2143,119 +2173,19 @@ inline __device__ void dev_mcl_mul_g2(const env_t& bn_env, MclFp2& z, const MclF
     dev_fp2Dbl_mulPreW(bn_env, d, x, y, lp);
     dev_mont_red(bn_env, z.c0.mont, d.a, lp, p, buf, pq, rp);
     dev_mont_red(bn_env, z.c1.mont, d.b, lp, p, buf, pq, rp);
-/*
-    const int group_id = threadIdx.x & (TPI-1);
-    uint32_t* buf2 = buf + N_32 + 2;
-    uint64_t *p64_buf1 = (uint64_t*)buf;
-    uint64_t *p64_buf2 = (uint64_t*)buf2;
-    p64_buf1[group_id + 1] = 0;
-    cgbn_store(bn_env, buf, d.a._low);
-    cgbn_store(bn_env, buf + 8, d.a._high);
-    cgbn_store(bn_env, buf2, d.b._low);
-    cgbn_store(bn_env, buf2 + 8, d.b._high);
+}
 
-    env_t::cgbn_wide_t lwt1, lwt2;
-
-    cgbn_mul_ui64(bn_env, lwt1, lp, p64_buf1[0] * rp);
-    cgbn_mul_ui64(bn_env, lwt2, lp, p64_buf2[0] * rp);
-    uint64_t first_ui64, second_ui64;
-    cgbn_get_ui64(bn_env, lwt1._high, (uint32_t*)&first_ui64, 0);
-    cgbn_get_ui64(bn_env, lwt2._high, (uint32_t*)&second_ui64, 0);
-
-    uint32_t carry1 = cgbn_add(bn_env, lwt1._high, d.a._low, lwt1._low);
-    uint32_t carry2 = cgbn_add(bn_env, lwt2._high, d.b._low, lwt2._low);
-    cgbn_store(bn_env, buf, lwt1._high);
-    cgbn_store(bn_env, buf2, lwt2._high);
-
-    uint64_t first_buf4 = carry1 + p64_buf1[N_64] + first_ui64;//p64_pq[0];
-    uint64_t second_buf4 = carry2 + p64_buf2[N_64] + second_ui64;//p64_pq[0];
-
-    p64_buf1[N_64] = first_buf4;
-    p64_buf2[N_64] = second_buf4;
-
-    int flag1 = first_buf4 < first_ui64|| first_buf4 < carry1 || first_buf4 < p64_buf1[N_64];
-    int flag2 = second_buf4 < second_ui64 || second_buf4 < carry2 || second_buf4 < p64_buf2[N_64];
-    cgbn_load(bn_env, lwt1._low, buf + N_32 + 2);     
-    cgbn_load(bn_env, lwt2._low, buf2 + N_32 + 2);     
-    cgbn_add_ui32(bn_env, lwt1._low, lwt1._low, flag1); 
-    cgbn_add_ui32(bn_env, lwt2._low, lwt2._low, flag2); 
-    cgbn_store(bn_env, buf + N_32 + 2, lwt1._low);
-    cgbn_store(bn_env, buf2 + N_32 + 2, lwt2._low);
-
-    p64_buf1++;
-    p64_buf2++;
-
-    for(int i = 1; i < 4; i++){
-        uint64_t first_tmp = p64_buf1[0] * rp;
-        uint64_t second_tmp = p64_buf2[0] * rp;
-        uint32_t first_tmp2 = cgbn_mul_ui32(bn_env, lwt1._high, lp, ((uint32_t*)&first_tmp)[0]); 
-        uint32_t second_tmp2 = cgbn_mul_ui32(bn_env, lwt2._high, lp, ((uint32_t*)&second_tmp)[0]); 
-        uint32_t first_tmp1 = cgbn_mul_ui32(bn_env, lwt1._low, lp, ((uint32_t*)&first_tmp)[1]); 
-        uint32_t second_tmp1 = cgbn_mul_ui32(bn_env, lwt2._low, lp, ((uint32_t*)&second_tmp)[1]); 
-        uint32_t carry1 = cgbn_get_ui32(bn_env, lwt1._high, 0);
-        uint32_t carry2 = cgbn_get_ui32(bn_env, lwt2._high, 0);
-        cgbn_shift_right(bn_env, lwt1._high, lwt1._high, 32);
-        cgbn_shift_right(bn_env, lwt2._high, lwt2._high, 32);
-        //uint32_t tmp3 = 
-        cgbn_add(bn_env, lwt1._low, lwt1._low, lwt1._high);
-        cgbn_add(bn_env, lwt2._low, lwt2._low, lwt2._high);
-        first_tmp = cgbn_get_ui32(bn_env, lwt1._low, 7);
-        second_tmp = cgbn_get_ui32(bn_env, lwt2._low, 7);
-        cgbn_shift_left(bn_env, lwt1._low, lwt1._low, 32); 
-        cgbn_shift_left(bn_env, lwt2._low, lwt2._low, 32); 
-        cgbn_load(bn_env, lwt1._high, (uint32_t*)p64_buf1);
-        cgbn_load(bn_env, lwt2._high, (uint32_t*)p64_buf2);
-        cgbn_add_ui32(bn_env, lwt1._low, lwt1._low, carry1);
-        cgbn_add_ui32(bn_env, lwt2._low, lwt2._low, carry2);
-        uint64_t first_tmp4 = (uint64_t)first_tmp + first_tmp2;
-        uint64_t second_tmp4 = (uint64_t)second_tmp + second_tmp2;
-        uint32_t first_tmp5 = (uint32_t)first_tmp4;
-        uint32_t second_tmp5 = (uint32_t)second_tmp4;
-        first_tmp1 += (first_tmp5 != first_tmp4 ? 1 : 0);
-        second_tmp1 += (second_tmp5 != second_tmp4 ? 1 : 0);
-        //pq[0] = first_tmp5;
-        //pq[1] = first_tmp1;
-        //pq[2] = second_tmp5;
-        //pq[3] = second_tmp1;
-        ((uint32_t*)&first_ui64)[0] = first_tmp5;
-        ((uint32_t*)&first_ui64)[1] = first_tmp1;
-        ((uint32_t*)&second_ui64)[0] = second_tmp5;
-        ((uint32_t*)&second_ui64)[1] = second_tmp1;
-
-        carry1 = cgbn_add(bn_env, lwt1._high, lwt1._high, lwt1._low);
-        carry2 = cgbn_add(bn_env, lwt2._high, lwt2._high, lwt2._low);
-        cgbn_store(bn_env, (uint32_t*)p64_buf1, lwt1._high);
-        cgbn_store(bn_env, (uint32_t*)p64_buf2, lwt2._high);
-
-        first_buf4 = carry1 + p64_buf1[N_64] + first_ui64;
-        second_buf4 = carry2 + p64_buf2[N_64] + second_ui64;
-        cgbn_load(bn_env, lwt1._low, (uint32_t*)(p64_buf1 + N_64 + 1));     
-        cgbn_load(bn_env, lwt2._low, (uint32_t*)(p64_buf2 + N_64 + 1));     
-        p64_buf1[N_64] = first_buf4;
-        p64_buf2[N_64] = second_buf4;
-
-        int flag1 = first_buf4 < first_ui64 || first_buf4 < carry1 || first_buf4 < p64_buf1[N_64];
-        int flag2 = second_buf4 < second_ui64 || second_buf4 < carry2 || second_buf4 < p64_buf2[N_64];
-        cgbn_add_ui32(bn_env, lwt1._low, lwt1._low, flag1); 
-        cgbn_add_ui32(bn_env, lwt2._low, lwt2._low, flag2); 
-
-        if(group_id < N_32 - i * 2)
-            cgbn_store(bn_env, (uint32_t*)(p64_buf1 + N_64 + 1), lwt1._low);
-            cgbn_store(bn_env, (uint32_t*)(p64_buf2 + N_64 + 1), lwt2._low);
-        p64_buf1++;
-        p64_buf2++;
-    }
-    cgbn_load(bn_env, lwt1._high, (uint32_t*)p64_buf1);
-    cgbn_load(bn_env, lwt2._high, (uint32_t*)p64_buf2);
-    carry1 = cgbn_sub(bn_env, z.c0.mont, lwt1._high, lp);
-    carry2 = cgbn_sub(bn_env, z.c1.mont, lwt2._high, lp);
-    if(p64_buf1[N_64] == 0 && carry1){
-        cgbn_set(bn_env, z.c0.mont, lwt1._high);
-    }
-    if(p64_buf2[N_64] == 0 && carry2){
-        cgbn_set(bn_env, z.c1.mont, lwt2._high);
-    }
-    */
+inline __device__ void dev_mcl_mul_g2_print(const env_t& bn_env, MclFp2& z, const MclFp2& x, const MclFp2& y, const env_t::cgbn_t& lp, uint32_t* const p, uint32_t* buf, uint32_t *pq , const uint64_t rp){
+    Fp2Dbl d;
+    dev_fp2Dbl_mulPreW(bn_env, d, x, y, lp);
+    if(threadIdx.x == 0)
+    printf("d\n");
+    print64(bn_env, d.a._low);
+    print64(bn_env, d.a._high);
+    print64(bn_env, d.b._low);
+    print64(bn_env, d.b._high);
+    dev_mont_red(bn_env, z.c0.mont, d.a, lp, p, buf, pq, rp);
+    dev_mont_red(bn_env, z.c1.mont, d.b, lp, p, buf, pq, rp);
 }
 
 __global__ void kernel_mcl_mul_g2(
@@ -2396,16 +2326,40 @@ inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(const env_t& bn_env, DevE
     MclFp2 r, U1, H3, S1;
     dev_mcl_sqr_g2(bn_env, r, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sqr_g2(bn_env, S1, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //if(threadIdx.x == 0)
+    //    printf("S1:\n");
+    //print64(bn_env, S1.c0.mont);
+    //print64(bn_env, S1.c1.mont);
     dev_mcl_mul_g2(bn_env, U1, P.x, S1, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, R.x, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, S1, S1, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //if(threadIdx.x == 0)
+    //    printf("S1:\n");
+    //print64(bn_env, S1.c0.mont);
+    //print64(bn_env, S1.c1.mont);
     dev_mcl_sub_g2(bn_env, R.x, R.x, U1, p.mont);
     dev_mcl_mul_g2(bn_env, r, r, P.z, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, S1, S1, P.y, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //if(threadIdx.x == 0)
+    //    printf("S1:\n");
+    //print64(bn_env, S1.c0.mont);
+    //print64(bn_env, S1.c1.mont);
     dev_mcl_mul_g2(bn_env, r, r, Q.y, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sub_g2(bn_env, r, r, S1, p.mont);
+
+    cgbn_store(bn_env, cache_buf, r.c0.mont);
+    //if(threadIdx.x == 0){
+    //    printf("r:");
+    //    for(int i = 0; i < 4; i++){
+    //        printf("%lu ", ((uint64_t*)cache_buf)[i]);
+    //    }
+    //    printf("\n");
+    //}
+
     if (R.x.is_zero(bn_env)) {
+        //printf("r.x is zero\n");
         if (r.is_zero(bn_env)) {
+            //printf("r is zero\n");
             R.dev_dblNoVerifyInfJacobi(bn_env, P, one, p, specialA_, cache_buf, cache_t, a_, rp);
         } else {
             R.clear(bn_env);
@@ -2414,17 +2368,49 @@ inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(const env_t& bn_env, DevE
     }
     dev_mcl_mul_g2(bn_env, R.z, P.z, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sqr_g2(bn_env, H3, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //if(threadIdx.x == 0)
+    //    printf("H3:\n");
+    //print64(bn_env, H3.c0.mont);
+    //print64(bn_env, H3.c1.mont);
     dev_mcl_mul_g2(bn_env, R.z, R.z, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, U1, U1, H3, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sqr_g2(bn_env, R.y, r, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_mul_g2(bn_env, H3, H3, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //if(threadIdx.x == 0)
+    //printf("H3:\n");
+    //print64(bn_env, H3.c0.mont);
+    //print64(bn_env, H3.c1.mont);
+
     dev_mcl_sub_g2(bn_env, R.y, R.y, U1, p.mont);
     dev_mcl_sub_g2(bn_env, R.y, R.y, U1, p.mont);
     dev_mcl_sub_g2(bn_env, R.x, R.y, H3, p.mont);
     dev_mcl_sub_g2(bn_env, U1, U1, R.x, p.mont);
+    //if(threadIdx.x == 0)
+    //printf("S1:\n");
+    //print64(bn_env, S1.c0.mont);
+    //print64(bn_env, S1.c1.mont);
     dev_mcl_mul_g2(bn_env, H3, H3, S1, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //dev_mcl_mul_g2_print(bn_env, H3, H3, S1, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //if(threadIdx.x == 0)
+    //printf("H3:\n");
+    //print64(bn_env, H3.c0.mont);
+    //print64(bn_env, H3.c1.mont);
     dev_mcl_mul_g2(bn_env, U1, U1, r, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sub_g2(bn_env, R.y, U1, H3, p.mont);
+    cgbn_store(bn_env, cache_buf, H3.c0.mont);
+    //if(threadIdx.x == 0){
+    //printf("H3:\n");
+    //}
+    //print64(bn_env, H3.c0.mont);
+    //print64(bn_env, H3.c1.mont);
+    cgbn_store(bn_env, cache_buf, U1.c0.mont);
+    //if(threadIdx.x == 0){
+    //    printf("U1:");
+    //    for(int i = 0; i < 4; i++){
+    //        printf("%lu ", ((uint64_t*)cache_buf)[i]);
+    //    }
+    //    printf("\n");
+    //}
 }
 
 
@@ -2605,7 +2591,7 @@ __global__ void kernel_ect_add_g2(
   context_t bn_context(cgbn_report_monitor, report, instance);
   env_t          bn_env(bn_context.env<env_t>());  
 
-  __shared__ uint32_t cache_buf[(N_32*2+2)*2], cache_t[N_32];
+  __shared__ uint32_t cache_buf[(N_32*2+2)*3], cache_t[N_32];
   DevEct2 lP, lQ;
   MclFp lone, lp;
   MclFp2 la;
@@ -2821,6 +2807,103 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum(
     }
   }
   store(bn_env, partial, result, offset + instance);
+  if(blockIdx.y == 0 && instance == 0){
+    print64(bn_env, result.x.c0.mont);
+    print64(bn_env, result.x.c1.mont);
+    print64(bn_env, result.y.c0.mont);
+    print64(bn_env, result.y.c1.mont);
+    print64(bn_env, result.z.c0.mont);
+    print64(bn_env, result.z.c1.mont);
+  }
+}
+
+inline __device__ void printInt256(const BigInt256::Int256 x){
+    for(int i = 0; i < 4; i++){
+        printf("%lu ", x[i]);
+    }
+    printf("\n");
+}
+
+template<int BlockSize>
+__global__ void kernel_mcl_bn128_g2_reduce_sum_new(
+    const int range_id,
+    const int range_offset,
+    mcl_bn128_g2 values, 
+    const Fp_model scalars,
+    const size_t *index_it,
+    mcl_bn128_g2 partial, 
+    const int ranges_size, 
+    const uint32_t* firsts,
+    const uint32_t* seconds,
+    const char* flags,
+    const Fp_model one, 
+    const Fp_model p, 
+    const Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    mcl_bn128_g2 t_zero,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int first = firsts[blockIdx.y];
+  int second = seconds[blockIdx.y];
+  int reduce_depth = second - first;//30130
+  int offset = blockIdx.y * gridDim.x * blockDim.x;
+
+  using BigInt256::Int;
+  using BigInt256::Int256;
+  //__shared__ Int cache_buf[BigInt256::N * 6 * BlockSize];
+  //Int* cache = cache_buf + threadIdx.x * 6 * BigInt256::N;
+
+  BigInt256::Point la;
+  la.c0 = (Int*)a.c0.mont_repr_data;
+  la.c1 = (Int*)a.c1.mont_repr_data;
+  BigInt256::Ect2 result;
+  Int256 r_x_c0, r_x_c1, r_y_c0, r_y_c1, r_z_c0, r_z_c1;
+  {
+      //result.x.c0 = cache;
+      //result.x.c1 = cache + BigInt256::N;
+      //result.y.c0 = cache + 2 * BigInt256::N;
+      //result.y.c1 = cache + 3 * BigInt256::N;
+      //result.z.c0 = cache + 4 * BigInt256::N;
+      //result.z.c1 = cache + 5 * BigInt256::N;
+      result.x.c0 = r_x_c0;
+      result.x.c1 = r_x_c1;
+
+      result.y.c0 = r_y_c0;
+      result.y.c1 = r_y_c1;
+
+      result.z.c0 = r_z_c0;
+      result.z.c1 = r_z_c1;
+      //result.clear();
+      memcpy(result.x.c0, t_zero.x.c0.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.x.c1, t_zero.x.c1.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.y.c0, t_zero.y.c0.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.y.c1, t_zero.y.c1.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.z.c0, t_zero.z.c0.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.z.c1, t_zero.z.c1.mont_repr_data, sizeof(BigInt256::Int256));
+  }
+  for(int i = first + tid; i < first + reduce_depth; i+= gridDim.x * blockDim.x){
+    const int j = index_it[i];
+    if(flags[j] == 1){
+        BigInt256::Ect2 dev_b;
+        dev_b.x.c0 = (Int*)(values.x.c0.mont_repr_data + i);
+        dev_b.x.c1 = (Int*)(values.x.c1.mont_repr_data + i);
+
+        dev_b.y.c0 = (Int*)(values.y.c0.mont_repr_data + i);
+        dev_b.y.c1 = (Int*)(values.y.c1.mont_repr_data + i);
+
+        dev_b.z.c0 = (Int*)(values.z.c0.mont_repr_data + i);
+        dev_b.z.c1 = (Int*)(values.z.c1.mont_repr_data + i);
+        BigInt256::add_g2(result, result, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+    }
+  }
+  //store(bn_env, partial, result, offset + instance);
+  memcpy(partial.x.c0.mont_repr_data + offset + tid, result.x.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.x.c1.mont_repr_data + offset + tid, result.x.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c0.mont_repr_data + offset + tid, result.y.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c1.mont_repr_data + offset + tid, result.y.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c0.mont_repr_data + offset + tid, result.z.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c1.mont_repr_data + offset + tid, result.z.c1, sizeof(BigInt256::Int256));
 }
 
 __global__ void kernel_mcl_bn128_g2_reduce_sum_after(
@@ -2859,6 +2942,87 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_after(
       add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + 2 * local_instance * (N_32 * 2 + 2), nullptr, la, mode_, rp);  
   }
   store(bn_env, partial, result, instance);
+}
+
+template<int BlockSize>
+__global__ void kernel_mcl_bn128_g2_reduce_sum_after_new(
+    mcl_bn128_g2 partial, 
+    const int half_n, 
+    const int n, 
+    const Fp_model one, 
+    const Fp_model p, 
+    const Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  if(tid >= half_n) return;
+
+  //__shared__ uint32_t cache_buf[2*32*(N_32*2+2)];//, cache_t[32 * (N_32)];
+  using BigInt256::Int;
+  using BigInt256::Int256;
+  //__shared__ Int cache_buf[BigInt256::N * 6 * BlockSize];
+  //Int* cache = cache_buf + threadIdx.x * 6 * BigInt256::N;
+
+  //MclFp lone, lp;
+  //MclFp2 la;
+  //load(bn_env, lone, one, 0); 
+  //load(bn_env, la, a, 0); 
+  //load(bn_env, lp, p, 0); 
+  //lp.ptr = (uint32_t*)p.mont_repr_data;
+  BigInt256::Point la;
+  la.c0 = (Int*)a.c0.mont_repr_data;
+  la.c1 = (Int*)a.c1.mont_repr_data;
+
+  //DevEct2 result;
+  //load(bn_env, result, partial, instance);
+  BigInt256::Ect2 result;
+  Int256 r_x_c0, r_x_c1, r_y_c0, r_y_c1, r_z_c0, r_z_c1;
+  {
+      //result.x.c0 = cache;
+      //result.x.c1 = cache + BigInt256::N;
+      //result.y.c0 = cache + 2 * BigInt256::N;
+      //result.y.c1 = cache + 3 * BigInt256::N;
+      //result.z.c0 = cache + 4 * BigInt256::N;
+      //result.z.c1 = cache + 5 * BigInt256::N;
+      //result.clear();
+      result.x.c0 = r_x_c0;
+      result.x.c1 = r_x_c1;
+
+      result.y.c0 = r_y_c0;
+      result.y.c1 = r_y_c1;
+
+      result.z.c0 = r_z_c0;
+      result.z.c1 = r_z_c1;
+      memcpy(result.x.c0, partial.x.c0.mont_repr_data + tid, sizeof(BigInt256::Int256));
+      memcpy(result.x.c1, partial.x.c1.mont_repr_data + tid, sizeof(BigInt256::Int256));
+      memcpy(result.y.c0, partial.y.c0.mont_repr_data + tid, sizeof(BigInt256::Int256));
+      memcpy(result.y.c1, partial.y.c1.mont_repr_data + tid, sizeof(BigInt256::Int256));
+      memcpy(result.z.c0, partial.z.c0.mont_repr_data + tid, sizeof(BigInt256::Int256));
+      memcpy(result.z.c1, partial.z.c1.mont_repr_data + tid, sizeof(BigInt256::Int256));
+  }
+  for(int i = half_n; i < n; i+= half_n){
+	  //DevEct2 dev_b;
+	  //load(bn_env, dev_b, partial, instance + i);
+      //add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + 2 * local_instance * (N_32 * 2 + 2), nullptr, la, mode_, rp);  
+        BigInt256::Ect2 dev_b;
+        dev_b.x.c0 = (Int*)(partial.x.c0.mont_repr_data + tid + i);
+        dev_b.x.c1 = (Int*)(partial.x.c1.mont_repr_data + tid + i);
+
+        dev_b.y.c0 = (Int*)(partial.y.c0.mont_repr_data + tid + i);
+        dev_b.y.c1 = (Int*)(partial.y.c1.mont_repr_data + tid + i);
+
+        dev_b.z.c0 = (Int*)(partial.z.c0.mont_repr_data + tid + i);
+        dev_b.z.c1 = (Int*)(partial.z.c1.mont_repr_data + tid + i);
+        BigInt256::add_g2(result, result, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+  }
+  //store(bn_env, partial, result, instance);
+  memcpy(partial.x.c0.mont_repr_data + tid, result.x.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.x.c1.mont_repr_data + tid, result.x.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c0.mont_repr_data + tid, result.y.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c1.mont_repr_data + tid, result.y.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c0.mont_repr_data + tid, result.z.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c1.mont_repr_data + tid, result.z.c1, sizeof(BigInt256::Int256));
 }
 
 
@@ -2925,6 +3089,48 @@ int mcl_bn128_g2_reduce_sum(
     int blocks = (half_n + INSTANCES_PER_BLOCK-1) / INSTANCES_PER_BLOCK;
     kernel_mcl_bn128_g2_reduce_sum_after<<<blocks, threads_per_block, 0, stream>>>(report, partial, half_n, n, one, p, a, specialA_, mode_, rp);
     //CUDA_CHECK(cudaDeviceSynchronize());
+    n /= 2;
+  }
+  return 0;
+}
+
+int mcl_bn128_g2_reduce_sum_new(
+    mcl_bn128_g2 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    mcl_bn128_g2 partial, 
+    uint32_t *counters,
+    char* flags,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    uint32_t *seconds,
+    const mcl_bn128_g2 t_zero,
+    const Fp_model field_zero,
+    const Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv,
+    const Fp_model one, const Fp_model p, const Fp_model2 a, const int specialA_, const int mode_, const uint64_t rp,
+    const int max_reduce_depth, cudaStream_t stream
+    ){
+  cgbn_error_report_t *report = get_error_report();
+
+  uint32_t threads = TPI * 64;
+  const int local_instances = 64 * BlockDepth;
+  uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
+  dim3 blocks(block_x, ranges_size, 1);
+  kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+
+  const int blocks_per_range = REDUCE_BLOCKS_PER_RANGE;
+  const int threads_per_block = INSTANCES_PER_BLOCK;
+
+  kernel_mcl_bn128_g2_reduce_sum_new<threads_per_block><<<dim3(blocks_per_range, ranges_size, 1), threads_per_block, 0, stream>>>(0, 0, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, one, p, a, specialA_, mode_, t_zero, rp);
+
+  int n = blocks_per_range * INSTANCES_PER_BLOCK * ranges_size;
+  while(n>=2){
+    int half_n = n / 2;
+    int blocks = (half_n + INSTANCES_PER_BLOCK-1) / INSTANCES_PER_BLOCK;
+    kernel_mcl_bn128_g2_reduce_sum_after_new<threads_per_block><<<blocks, threads_per_block, 0, stream>>>(partial, half_n, n, one, p, a, specialA_, mode_, rp);
     n /= 2;
   }
   return 0;

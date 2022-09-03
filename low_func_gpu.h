@@ -145,6 +145,26 @@ int mcl_bn128_g2_reduce_sum(
     Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int mode_, const uint64_t rp,
     const int max_reduce_depth, cudaStream_t stream);
 
+int mcl_bn128_g2_reduce_sum_new(
+    mcl_bn128_g2 values, 
+    Fp_model scalars, 
+    const size_t *index_it,
+    mcl_bn128_g2 partial, 
+    uint32_t *counters,
+    char* flags,
+    const uint32_t ranges_size,
+    const uint32_t *firsts,
+    uint32_t *seconds,
+    mcl_bn128_g2 t_zero,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
+    Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int mode_, const uint64_t rp,
+    const int max_reduce_depth, cudaStream_t stream);
+
+
 void mcl_split_to_bucket_g2(
     mcl_bn128_g2 data, 
     mcl_bn128_g2 out, 

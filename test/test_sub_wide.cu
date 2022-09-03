@@ -4,6 +4,7 @@
 #include <vector>
 #include <iostream>
 using namespace std;
+#include "bigint_256.cuh"
 
 #define TPI 8
 #define BITS 256
@@ -136,6 +137,8 @@ inline __device__ void dev_fp2Dbl_mulPreW(
     }
 }
 
+#include "bigint_256.cuh"
+
 __global__ void kernel_fp2Dbl_mulPreW(
     cgbn_error_report_t* report, 
     uint32_t* z, uint32_t* x, uint32_t* y,
@@ -143,30 +146,57 @@ __global__ void kernel_fp2Dbl_mulPreW(
     const int n
 ){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int instance = tid / 8;
-    if(instance >= n) return;
-  context_t bn_context(cgbn_report_monitor, report, instance);
-  env_t          bn_env(bn_context.env<env_t>());  
-  Fp2Dbl lz;
-  MclFp2 lx, ly;
-  cgbn_load(bn_env, lx.c0.mont, x + instance * 16);
-  cgbn_load(bn_env, lx.c1.mont, x + instance * 16 + 8);
-  cgbn_load(bn_env, ly.c0.mont, y + instance * 16);
-  cgbn_load(bn_env, ly.c1.mont, y + instance * 16 + 8);
-  env_t::cgbn_t lp;
-  cgbn_load(bn_env, lp, p);
-  dev_fp2Dbl_mulPreW(bn_env, lz, lx, ly, lp);
-  cgbn_store(bn_env, z + instance * 32, lz.a._low);
-  cgbn_store(bn_env, z + instance * 32 + 8, lz.a._high);
-  cgbn_store(bn_env, z + instance * 32 + 16, lz.b._low);
-  cgbn_store(bn_env, z + instance * 32 + 24, lz.b._high);
+ //   int instance = tid / 8;
+ //   if(instance >= n) return;
+ // context_t bn_context(cgbn_report_monitor, report, instance);
+ // env_t          bn_env(bn_context.env<env_t>());  
+ // Fp2Dbl lz;
+ // MclFp2 lx, ly;
+ // cgbn_load(bn_env, lx.c0.mont, x + instance * 16);
+ // cgbn_load(bn_env, lx.c1.mont, x + instance * 16 + 8);
+ // cgbn_load(bn_env, ly.c0.mont, y + instance * 16);
+ // cgbn_load(bn_env, ly.c1.mont, y + instance * 16 + 8);
+ // env_t::cgbn_t lp;
+ // cgbn_load(bn_env, lp, p);
+ // dev_fp2Dbl_mulPreW(bn_env, lz, lx, ly, lp);
+ // cgbn_store(bn_env, z + instance * 32, lz.a._low);
+ // cgbn_store(bn_env, z + instance * 32 + 8, lz.a._high);
+ // cgbn_store(bn_env, z + instance * 32 + 16, lz.b._low);
+ // cgbn_store(bn_env, z + instance * 32 + 24, lz.b._high);
+ {
+    using BigInt256::N;
+    using BigInt256::Int;
+    using BigInt256::Int256;
+    using BigInt256::Point;
+    Int c0[N*2], c1[N*2];
+    Point d;
+    d.c0 = c0;
+    d.c1 = c1;
+    d.clear();
+    Point lx, ly;
+    lx.c0 = (Int*)x;
+    lx.c1 = (Int*)(x+8);
+    ly.c0 = (Int*)y;
+    ly.c1 = (Int*)(y+8);
+    dev_fp2Dbl_mulPreW(lx, ly, (Int*)p, d);
+    memcpy(z, d.c0, sizeof(Int256)*2);
+    memcpy(z + 16, d.c1, sizeof(Int256)*2);
+ }
 }
 
 void test_mulPreW(){
+//R.y.c0:
+//5631192958601619009 17570819427908138503 14453536578263537156 1018064349592658184
+//R.y.c1:
+//10045992945208776667 2172252939331516066 15232799996704109209 3475724148307828247
+//p:
+//4332616871279656263 10917124144477883021 13281191951274694749 3486998266802970665
+//rp = 9786893198990664585
+
     uint64_t x[8] = {17504212154399292175, 13406480092263516530, 11052506301539585977, 370724817334823578, 2738505452492009767, 11348385648817470847, 5987438616802946354, 2267050511450853472};
     uint64_t y[8] = {9346595941626535758, 6891782256290078197, 8914842573943073617, 3049015830585680570, 854176251880143851, 909606410567745456, 6999250755325914748, 1124442457008671669};
     uint64_t p[4] = {4332616871279656263, 10917124144477883021, 13281191951274694749, 3486998266802970665};
-    const int n = 16000;
+    const int n = 1;
     std::vector<uint64_t> all_x(n * 8), all_y(n * 8), all_z(n * 16);
     for(int i = 0; i < n; i++){
         memcpy(&all_x[i * 8], x, 8 * sizeof(int64_t)); 
@@ -218,10 +248,11 @@ void test_mulPreW(){
     cgbn_error_report_t* report = nullptr;
     cgbn_error_report_alloc(&report); 
     int local_instances = 64;
-    int threads = local_instances * 8;
+    int threads = local_instances * TPI;
     int blocks = (n + threads - 1) / threads;
     printf("threads = %d, blocks=%d\n", threads, blocks);
-    kernel_fp2Dbl_mulPreW<<<blocks, threads>>>(report, d_z, d_x, d_y, d_p, n);
+    //kernel_fp2Dbl_mulPreW<<<blocks, threads>>>(report, d_z, d_x, d_y, d_p, n);
+    kernel_fp2Dbl_mulPreW<<<1, 1>>>(report, d_z, d_x, d_y, d_p, n);
     cudaMemcpy(z.data(), d_z, n * 128, cudaMemcpyDeviceToHost);
     //for(int i = 0; i < 16; i++){
     //    printf("%lu ", z[i]);
@@ -548,8 +579,8 @@ void test_mcl_mul_g2(){
 
 int main(){
     //test_sub_wide();
-    //test_mulPreW();
-    test_mont_red();
+    test_mulPreW();
+    //test_mont_red();
     //test_mcl_mul_g2();
     return 0;
 }
