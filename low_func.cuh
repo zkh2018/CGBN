@@ -820,11 +820,14 @@ __global__ void kernel_reduce_sum_pre_new(
     cgbn_mem_t<BITS>* bn_exponents,
     cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv){
     int tid = threadIdx.x + blockDim.x * blockIdx.x;
-    using BigInt256::Int;
-    Int* local_zero = (Int*)field_zero.mont_repr_data;
-    Int* local_one = (Int*)field_one.mont_repr_data;
+    using namespace BigInt256;
+    Int256 local_zero, local_one;
+    memcpy(local_zero, field_zero.mont_repr_data, sizeof(Int256));
+    memcpy(local_one, field_one.mont_repr_data, sizeof(Int256));
     for(int i = tid; i < n; i+=gridDim.x * blockDim.x){
-        Int *scalar = (Int*)(scalars.mont_repr_data + i);
+        //Int *scalar = (Int*)(scalars.mont_repr_data + i);
+        Int256 scalar;
+        memcpy(scalar, scalars.mont_repr_data + i, sizeof(Int256));
         if(BigInt256::dev_equal(scalar, local_zero)){
         }
         else if(BigInt256::dev_equal(scalar, local_one)){
@@ -854,17 +857,20 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_pre_new(
     ){
   int instance = blockIdx.x * blockDim.x + threadIdx.x;
 
-  int range_offset = blockIdx.y * gridDim.x * blockDim.x;
+  //int range_offset = blockIdx.y * gridDim.x * blockDim.x;
   int first = firsts[blockIdx.y];
   int second = seconds[blockIdx.y];
   int reduce_depth = second - first;//30130
   using namespace BigInt256;
-  Int* local_zero = (Int*)field_zero.mont_repr_data;
-  Int* local_one = (Int*)field_one.mont_repr_data;
+  Int256 local_zero, local_one;
+  memcpy(local_zero, field_zero.mont_repr_data, sizeof(Int256));
+  memcpy(local_one, field_one.mont_repr_data, sizeof(Int256));
 
   for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * blockDim.x){
     const int j = index_it[i];
-    Int *scalar = (Int*)(scalars.mont_repr_data + j);
+    //Int *scalar = (Int*)(scalars.mont_repr_data + j);
+    Int256 scalar;
+    memcpy(scalar, scalars.mont_repr_data + j, sizeof(Int256));
     if(BigInt256::dev_equal(scalar, local_zero)){
     }
     else if(BigInt256::dev_equal(scalar, local_one)){
@@ -873,9 +879,8 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_pre_new(
     else{
         density[i] = 1;
         Int res[N];
-      dev_as_bigint(scalar, (Int*)field_modulus, field_inv, res);
-      //a.store(bn_env, bn_exponents, i);
-      memcpy(bn_exponents + i, res, N*sizeof(Int));
+        dev_as_bigint(scalar, (Int*)field_modulus, field_inv, res);
+        memcpy(bn_exponents + i, res, N*sizeof(Int));
     }
   }
 }
@@ -2653,7 +2658,6 @@ __global__ void kernel_ect_add_g2(
 
 template<int BlockInstances>
 __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range5(
-    cgbn_error_report_t* report, 
     mcl_bn128_g2 values, 
     const Fp_model scalars,
     const size_t *index_it,
@@ -2670,49 +2674,87 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range5(
     const int specialA_,
     const int mode_,
     const uint64_t rp){
-  const int local_instance = threadIdx.x / TPI;//0~63
-  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  const int instance = tid / TPI;
+  const int instance = threadIdx.x + blockIdx.x * blockDim.x;
 
-  const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * BlockInstances;
+  //const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * blockDim.x;
   const int first = firsts[range_id_offset + blockIdx.y];
   const int second = seconds[range_id_offset + blockIdx.y];
   const int reduce_depth = second - first;//30130
   if(reduce_depth <= 1) return;
   const int half_depth = (reduce_depth + 1) / 2;
 
-  context_t bn_context(cgbn_report_monitor, report, instance_offset + instance);
-  env_t          bn_env(bn_context.env<env_t>());  
   if(instance >= half_depth) return;
-  __shared__ uint32_t cache_buf[2*BlockInstances*(N_32*2+2)];//, cache_t[BlockInstances * (N_32+2)];
 
-  MclFp lone, lp;
-  MclFp2 la;
-  load(bn_env, lone, one, 0); 
-  load(bn_env, la, a, 0); 
-  load(bn_env, lp, p, 0); 
-  lp.ptr = (uint32_t*)p.mont_repr_data;
+  using namespace BigInt256;
+  BigInt256::Point la;
+  la.c0 = (Int*)a.c0.mont_repr_data;
+  la.c1 = (Int*)a.c1.mont_repr_data;
+  BigInt256::Ect2 result;
+  Int256 r_x_c0, r_x_c1, r_y_c0, r_y_c1, r_z_c0, r_z_c1;
+  {
+      result.x.c0 = r_x_c0;
+      result.x.c1 = r_x_c1;
 
-  DevEct2 result;
+      result.y.c0 = r_y_c0;
+      result.y.c1 = r_y_c1;
+
+      result.z.c0 = r_z_c0;
+      result.z.c1 = r_z_c1;
+  }
   if(flags[index_it[first + instance]] == 1){
-      load(bn_env, result, values, first+instance);
-    }else{
-        load(bn_env, result, t_zero, 0);
-      }
+      memcpy(result.x.c0, values.x.c0.mont_repr_data + first+instance, sizeof(BigInt256::Int256));
+      memcpy(result.x.c1, values.x.c1.mont_repr_data + first+instance, sizeof(BigInt256::Int256));
+      memcpy(result.y.c0, values.y.c0.mont_repr_data + first+instance, sizeof(BigInt256::Int256));
+      memcpy(result.y.c1, values.y.c1.mont_repr_data + first+instance, sizeof(BigInt256::Int256));
+      memcpy(result.z.c0, values.z.c0.mont_repr_data + first+instance, sizeof(BigInt256::Int256));
+      memcpy(result.z.c1, values.z.c1.mont_repr_data + first+instance, sizeof(BigInt256::Int256));
+  }else{
+      memcpy(result.x.c0, t_zero.x.c0.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.x.c1, t_zero.x.c1.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.y.c0, t_zero.y.c0.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.y.c1, t_zero.y.c1.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.z.c0, t_zero.z.c0.mont_repr_data, sizeof(BigInt256::Int256));
+      memcpy(result.z.c1, t_zero.z.c1.mont_repr_data, sizeof(BigInt256::Int256));
+  }
   for(int i = first + instance+half_depth; i < first + reduce_depth; i+= half_depth){
       const int j = index_it[i];
       if(flags[j] == 1){
-            DevEct2 dev_b;
-            load(bn_env, dev_b, values, i);
-            add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + 2 * local_instance * (N_32 * 2 + 2), nullptr, la, mode_, rp);  
-          }
-    }
-  store(bn_env, partial, result, first + instance);
+          BigInt256::Ect2 dev_b;
+      Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+      dev_b.x.c0 = b_x_c0;
+      dev_b.x.c1 = b_x_c1;
+      dev_b.y.c0 = b_y_c0;
+      dev_b.y.c1 = b_y_c1;
+      dev_b.z.c0 = b_z_c0;
+      dev_b.z.c1 = b_z_c1;
+      memcpy(dev_b.x.c0, values.x.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.x.c1, values.x.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c0, values.y.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c1, values.y.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c0, values.z.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c1, values.z.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+          //dev_b.x.c0 = (Int*)(values.x.c0.mont_repr_data + i);
+          //dev_b.x.c1 = (Int*)(values.x.c1.mont_repr_data + i);
+
+          //dev_b.y.c0 = (Int*)(values.y.c0.mont_repr_data + i);
+          //dev_b.y.c1 = (Int*)(values.y.c1.mont_repr_data + i);
+
+          //dev_b.z.c0 = (Int*)(values.z.c0.mont_repr_data + i);
+          //dev_b.z.c1 = (Int*)(values.z.c1.mont_repr_data + i);
+          BigInt256::add_g2(result, result, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+      }
+  }
+  //store(bn_env, partial, result, first + instance);
+  memcpy(partial.x.c0.mont_repr_data + first + instance, result.x.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.x.c1.mont_repr_data + first + instance, result.x.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c0.mont_repr_data + first + instance, result.y.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c1.mont_repr_data + first + instance, result.y.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c0.mont_repr_data + first + instance, result.z.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c1.mont_repr_data + first + instance, result.z.c1, sizeof(BigInt256::Int256));
 }
 
 template<int BlockInstances>
 __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range7(
-    cgbn_error_report_t* report, 
     mcl_bn128_g2 values, 
     Fp_model scalars,
     const size_t *index_it,
@@ -2729,42 +2771,76 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range7(
     const int specialA_,
     const int mode_,
     const uint64_t rp){
-  const int local_instance = threadIdx.x / TPI;//0~63
-  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  const int instance = tid / TPI;
+  const int instance = threadIdx.x + blockIdx.x * blockDim.x;
 
-  const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * BlockInstances;
+  //const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * blockDim.x;
   const int first = firsts[range_id_offset + blockIdx.y];
   const int second = seconds[range_id_offset + blockIdx.y];
   const int reduce_depth = second - first;//30130
   if(reduce_depth <= 1) return;
   const int half_depth = (reduce_depth + 1) / 2;
 
-  context_t bn_context(cgbn_report_monitor, report, instance_offset + instance);
-  env_t          bn_env(bn_context.env<env_t>());  
   if(instance >= half_depth) return;
 
-  __shared__ uint32_t cache_buf[2*BlockInstances*(N_32*2+2)];//, cache_t[BlockInstances * (N_32+2)];
+  using namespace BigInt256;
+  BigInt256::Point la;
+  la.c0 = (Int*)a.c0.mont_repr_data;
+  la.c1 = (Int*)a.c1.mont_repr_data;
+  BigInt256::Ect2 result;
+  Int256 r_x_c0, r_x_c1, r_y_c0, r_y_c1, r_z_c0, r_z_c1;
+  {
+      result.x.c0 = r_x_c0;
+      result.x.c1 = r_x_c1;
 
-  MclFp lone, lp;
-  MclFp2 la;
-  load(bn_env, lone, one, 0); 
-  load(bn_env, la, a, 0); 
-  load(bn_env, lp, p, 0); 
-  lp.ptr = (uint32_t*)p.mont_repr_data;
+      result.y.c0 = r_y_c0;
+      result.y.c1 = r_y_c1;
 
-  DevEct2 result;
-  load(bn_env, result, values, first+instance);
-  for(int i = first + instance+half_depth; i < first + reduce_depth; i+= half_depth){
-        DevEct2 dev_b;
-        load(bn_env, dev_b, values, i);
-        add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + 2 * local_instance * (N_32*2+2), nullptr, la, mode_, rp);  
+      result.z.c0 = r_z_c0;
+      result.z.c1 = r_z_c1;
+      //result.clear();
+      memcpy(result.x.c0, values.x.c0.mont_repr_data + first + instance, sizeof(BigInt256::Int256));
+      memcpy(result.x.c1, values.x.c1.mont_repr_data + first + instance, sizeof(BigInt256::Int256));
+      memcpy(result.y.c0, values.y.c0.mont_repr_data + first + instance, sizeof(BigInt256::Int256));
+      memcpy(result.y.c1, values.y.c1.mont_repr_data + first + instance, sizeof(BigInt256::Int256));
+      memcpy(result.z.c0, values.z.c0.mont_repr_data + first + instance, sizeof(BigInt256::Int256));
+      memcpy(result.z.c1, values.z.c1.mont_repr_data + first + instance, sizeof(BigInt256::Int256));
   }
-  store(bn_env, partial, result, first + instance);
+
+  for(int i = first + instance+half_depth; i < first + reduce_depth; i+= half_depth){
+      BigInt256::Ect2 dev_b;
+      Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+      dev_b.x.c0 = b_x_c0;
+      dev_b.x.c1 = b_x_c1;
+      dev_b.y.c0 = b_y_c0;
+      dev_b.y.c1 = b_y_c1;
+      dev_b.z.c0 = b_z_c0;
+      dev_b.z.c1 = b_z_c1;
+      memcpy(dev_b.x.c0, values.x.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.x.c1, values.x.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c0, values.y.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c1, values.y.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c0, values.z.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c1, values.z.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      //dev_b.x.c0 = (Int*)(values.x.c0.mont_repr_data + i);
+      //dev_b.x.c1 = (Int*)(values.x.c1.mont_repr_data + i);
+
+      //dev_b.y.c0 = (Int*)(values.y.c0.mont_repr_data + i);
+      //dev_b.y.c1 = (Int*)(values.y.c1.mont_repr_data + i);
+
+      //dev_b.z.c0 = (Int*)(values.z.c0.mont_repr_data + i);
+      //dev_b.z.c1 = (Int*)(values.z.c1.mont_repr_data + i);
+      BigInt256::add_g2(result, result, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+  }
+  //store(bn_env, partial, result, first + instance);
+  memcpy(partial.x.c0.mont_repr_data + first + instance, result.x.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.x.c1.mont_repr_data + first + instance, result.x.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c0.mont_repr_data + first + instance, result.y.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c1.mont_repr_data + first + instance, result.y.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c0.mont_repr_data + first + instance, result.z.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c1.mont_repr_data + first + instance, result.z.c1, sizeof(BigInt256::Int256));
 }
 
 __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range6(
-    cgbn_error_report_t* report, 
     mcl_bn128_g2 partial, 
     const int n, 
     const uint32_t* firsts,
@@ -2774,29 +2850,64 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range6(
     const int specialA_,
     const int mode_,
     const uint64_t rp){
-  int instance = threadIdx.x / TPI;
+  //int instance = threadIdx.x;
 
-  context_t bn_context(cgbn_report_monitor, report, instance);
-  env_t          bn_env(bn_context.env<env_t>());  
+  using namespace BigInt256;
 
-  __shared__ uint32_t cache_buf[2*(N_32*2+2)];//, cache_t[N_32+2];
+  //load(bn_env, result, partial, firsts[0]);
+  BigInt256::Point la;
+  la.c0 = (Int*)a.c0.mont_repr_data;
+  la.c1 = (Int*)a.c1.mont_repr_data;
+  BigInt256::Ect2 result;
+  Int256 r_x_c0, r_x_c1, r_y_c0, r_y_c1, r_z_c0, r_z_c1;
+  {
+      result.x.c0 = r_x_c0;
+      result.x.c1 = r_x_c1;
 
-  MclFp lone, lp;
-  MclFp2 la;
-  load(bn_env, lone, one, 0); 
-  load(bn_env, la, a, 0); 
-  load(bn_env, lp, p, 0); 
-  lp.ptr = (uint32_t*)p.mont_repr_data;
+      result.y.c0 = r_y_c0;
+      result.y.c1 = r_y_c1;
 
-  DevEct2 result;
-  load(bn_env, result, partial, firsts[0]);
+      result.z.c0 = r_z_c0;
+      result.z.c1 = r_z_c1;
+      memcpy(result.x.c0, partial.x.c0.mont_repr_data + firsts[0], sizeof(BigInt256::Int256));
+      memcpy(result.x.c1, partial.x.c1.mont_repr_data + firsts[0], sizeof(BigInt256::Int256));
+      memcpy(result.y.c0, partial.y.c0.mont_repr_data + firsts[0], sizeof(BigInt256::Int256));
+      memcpy(result.y.c1, partial.y.c1.mont_repr_data + firsts[0], sizeof(BigInt256::Int256));
+      memcpy(result.z.c0, partial.z.c0.mont_repr_data + firsts[0], sizeof(BigInt256::Int256));
+      memcpy(result.z.c1, partial.z.c1.mont_repr_data + firsts[0], sizeof(BigInt256::Int256));
+  }
 
   for(int i = 1; i < n; i++){
-      DevEct2 dev_b;
-      load(bn_env, dev_b, partial, firsts[i]);
-      add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf, nullptr, la, mode_, rp);  
+      BigInt256::Ect2 dev_b;
+      Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+      dev_b.x.c0 = b_x_c0;
+      dev_b.x.c1 = b_x_c1;
+      dev_b.y.c0 = b_y_c0;
+      dev_b.y.c1 = b_y_c1;
+      dev_b.z.c0 = b_z_c0;
+      dev_b.z.c1 = b_z_c1;
+      memcpy(dev_b.x.c0, partial.x.c0.mont_repr_data+firsts[i], sizeof(BigInt256::Int256));
+      memcpy(dev_b.x.c1, partial.x.c1.mont_repr_data+firsts[i], sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c0, partial.y.c0.mont_repr_data+firsts[i], sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c1, partial.y.c1.mont_repr_data+firsts[i], sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c0, partial.z.c0.mont_repr_data+firsts[i], sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c1, partial.z.c1.mont_repr_data+firsts[i], sizeof(BigInt256::Int256));
+      //dev_b.x.c0 = (Int*)(partial.x.c0.mont_repr_data + firsts[i]);
+      //dev_b.x.c1 = (Int*)(partial.x.c1.mont_repr_data + firsts[i]);
+
+      //dev_b.y.c0 = (Int*)(partial.y.c0.mont_repr_data + firsts[i]);
+      //dev_b.y.c1 = (Int*)(partial.y.c1.mont_repr_data + firsts[i]);
+
+      //dev_b.z.c0 = (Int*)(partial.z.c0.mont_repr_data + firsts[i]);
+      //dev_b.z.c1 = (Int*)(partial.z.c1.mont_repr_data + firsts[i]);
+      BigInt256::add_g2(result, result, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
     }
-  store(bn_env, partial, result, 0);
+  memcpy(partial.x.c0.mont_repr_data, result.x.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.x.c1.mont_repr_data, result.x.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c0.mont_repr_data, result.y.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.y.c1.mont_repr_data, result.y.c1, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c0.mont_repr_data, result.z.c0, sizeof(BigInt256::Int256));
+  memcpy(partial.z.c1.mont_repr_data, result.z.c1, sizeof(BigInt256::Int256));
 }
 
 __global__ void kernel_mcl_bn128_g2_reduce_sum(
@@ -2886,21 +2997,17 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_new(
 
   using BigInt256::Int;
   using BigInt256::Int256;
-  //__shared__ Int cache_buf[BigInt256::N * 6 * BlockSize];
-  //Int* cache = cache_buf + threadIdx.x * 6 * BigInt256::N;
 
   BigInt256::Point la;
-  la.c0 = (Int*)a.c0.mont_repr_data;
-  la.c1 = (Int*)a.c1.mont_repr_data;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+  //la.c0 = (Int*)a.c0.mont_repr_data;
+  //la.c1 = (Int*)a.c1.mont_repr_data;
   BigInt256::Ect2 result;
   Int256 r_x_c0, r_x_c1, r_y_c0, r_y_c1, r_z_c0, r_z_c1;
   {
-      //result.x.c0 = cache;
-      //result.x.c1 = cache + BigInt256::N;
-      //result.y.c0 = cache + 2 * BigInt256::N;
-      //result.y.c1 = cache + 3 * BigInt256::N;
-      //result.z.c0 = cache + 4 * BigInt256::N;
-      //result.z.c1 = cache + 5 * BigInt256::N;
       result.x.c0 = r_x_c0;
       result.x.c1 = r_x_c1;
 
@@ -2921,14 +3028,27 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_new(
     const int j = index_it[i];
     if(flags[j] == 1){
         BigInt256::Ect2 dev_b;
-        dev_b.x.c0 = (Int*)(values.x.c0.mont_repr_data + i);
-        dev_b.x.c1 = (Int*)(values.x.c1.mont_repr_data + i);
+      Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+      dev_b.x.c0 = b_x_c0;
+      dev_b.x.c1 = b_x_c1;
+      dev_b.y.c0 = b_y_c0;
+      dev_b.y.c1 = b_y_c1;
+      dev_b.z.c0 = b_z_c0;
+      dev_b.z.c1 = b_z_c1;
+      memcpy(dev_b.x.c0, values.x.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.x.c1, values.x.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c0, values.y.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c1, values.y.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c0, values.z.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c1, values.z.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+        //dev_b.x.c0 = (Int*)(values.x.c0.mont_repr_data + i);
+        //dev_b.x.c1 = (Int*)(values.x.c1.mont_repr_data + i);
 
-        dev_b.y.c0 = (Int*)(values.y.c0.mont_repr_data + i);
-        dev_b.y.c1 = (Int*)(values.y.c1.mont_repr_data + i);
+        //dev_b.y.c0 = (Int*)(values.y.c0.mont_repr_data + i);
+        //dev_b.y.c1 = (Int*)(values.y.c1.mont_repr_data + i);
 
-        dev_b.z.c0 = (Int*)(values.z.c0.mont_repr_data + i);
-        dev_b.z.c1 = (Int*)(values.z.c1.mont_repr_data + i);
+        //dev_b.z.c0 = (Int*)(values.z.c0.mont_repr_data + i);
+        //dev_b.z.c1 = (Int*)(values.z.c1.mont_repr_data + i);
         BigInt256::add_g2(result, result, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
     }
   }
@@ -2993,34 +3113,17 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_after_new(
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   if(tid >= half_n) return;
 
-  //__shared__ uint32_t cache_buf[2*32*(N_32*2+2)];//, cache_t[32 * (N_32)];
   using BigInt256::Int;
   using BigInt256::Int256;
-  //__shared__ Int cache_buf[BigInt256::N * 6 * BlockSize];
-  //Int* cache = cache_buf + threadIdx.x * 6 * BigInt256::N;
-
-  //MclFp lone, lp;
-  //MclFp2 la;
-  //load(bn_env, lone, one, 0); 
-  //load(bn_env, la, a, 0); 
-  //load(bn_env, lp, p, 0); 
-  //lp.ptr = (uint32_t*)p.mont_repr_data;
   BigInt256::Point la;
-  la.c0 = (Int*)a.c0.mont_repr_data;
-  la.c1 = (Int*)a.c1.mont_repr_data;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
 
-  //DevEct2 result;
-  //load(bn_env, result, partial, instance);
   BigInt256::Ect2 result;
   Int256 r_x_c0, r_x_c1, r_y_c0, r_y_c1, r_z_c0, r_z_c1;
   {
-      //result.x.c0 = cache;
-      //result.x.c1 = cache + BigInt256::N;
-      //result.y.c0 = cache + 2 * BigInt256::N;
-      //result.y.c1 = cache + 3 * BigInt256::N;
-      //result.z.c0 = cache + 4 * BigInt256::N;
-      //result.z.c1 = cache + 5 * BigInt256::N;
-      //result.clear();
       result.x.c0 = r_x_c0;
       result.x.c1 = r_x_c1;
 
@@ -3037,18 +3140,28 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_after_new(
       memcpy(result.z.c1, partial.z.c1.mont_repr_data + tid, sizeof(BigInt256::Int256));
   }
   for(int i = half_n; i < n; i+= half_n){
-	  //DevEct2 dev_b;
-	  //load(bn_env, dev_b, partial, instance + i);
-      //add_g2(bn_env, result, result, dev_b, lone, lp, specialA_, cache_buf + 2 * local_instance * (N_32 * 2 + 2), nullptr, la, mode_, rp);  
         BigInt256::Ect2 dev_b;
-        dev_b.x.c0 = (Int*)(partial.x.c0.mont_repr_data + tid + i);
-        dev_b.x.c1 = (Int*)(partial.x.c1.mont_repr_data + tid + i);
+      Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+      dev_b.x.c0 = b_x_c0;
+      dev_b.x.c1 = b_x_c1;
+      dev_b.y.c0 = b_y_c0;
+      dev_b.y.c1 = b_y_c1;
+      dev_b.z.c0 = b_z_c0;
+      dev_b.z.c1 = b_z_c1;
+      memcpy(dev_b.x.c0, partial.x.c0.mont_repr_data+tid+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.x.c1, partial.x.c1.mont_repr_data+tid+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c0, partial.y.c0.mont_repr_data+tid+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c1, partial.y.c1.mont_repr_data+tid+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c0, partial.z.c0.mont_repr_data+tid+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c1, partial.z.c1.mont_repr_data+tid+i, sizeof(BigInt256::Int256));
+        //dev_b.x.c0 = (Int*)(partial.x.c0.mont_repr_data + tid + i);
+        //dev_b.x.c1 = (Int*)(partial.x.c1.mont_repr_data + tid + i);
 
-        dev_b.y.c0 = (Int*)(partial.y.c0.mont_repr_data + tid + i);
-        dev_b.y.c1 = (Int*)(partial.y.c1.mont_repr_data + tid + i);
+        //dev_b.y.c0 = (Int*)(partial.y.c0.mont_repr_data + tid + i);
+        //dev_b.y.c1 = (Int*)(partial.y.c1.mont_repr_data + tid + i);
 
-        dev_b.z.c0 = (Int*)(partial.z.c0.mont_repr_data + tid + i);
-        dev_b.z.c1 = (Int*)(partial.z.c1.mont_repr_data + tid + i);
+        //dev_b.z.c0 = (Int*)(partial.z.c0.mont_repr_data + tid + i);
+        //dev_b.z.c1 = (Int*)(partial.z.c1.mont_repr_data + tid + i);
         BigInt256::add_g2(result, result, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
   }
   //store(bn_env, partial, result, instance);
@@ -3164,7 +3277,6 @@ int mcl_bn128_g2_reduce_sum_new(
       uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
       dim3 blocks(block_x, ranges_size, 1);
       kernel_mcl_bn128_g1_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
-      //kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
   }else{
       int threads = 256;
       int blocks = (values_size + threads - 1) / threads;
@@ -3174,14 +3286,36 @@ int mcl_bn128_g2_reduce_sum_new(
   const int blocks_per_range = REDUCE_BLOCKS_PER_RANGE;
   const int threads_per_block = INSTANCES_PER_BLOCK;
 
-  kernel_mcl_bn128_g2_reduce_sum_new<threads_per_block><<<dim3(blocks_per_range, ranges_size, 1), threads_per_block, 0, stream>>>(0, 0, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, one, p, a, specialA_, mode_, t_zero, rp);
+  if(true){
+      int n = max_reduce_depth;
+      const int local_instances2 = 64;
+      int threads = local_instances2;
+      uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
+      dim3 blocks2(block_x2, ranges_size, 1);
+      kernel_mcl_bn128_g2_reduce_sum_one_range5<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+      const int update_threads = 64;
+      const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
+      kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
+      //CUDA_CHECK(cudaDeviceSynchronize());
+      n = (n+1)/2;
+      while(n>=2){
+          uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
+          dim3 blocks2(block_x2, ranges_size, 1);
+          kernel_mcl_bn128_g2_reduce_sum_one_range7<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+          kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
+          n = (n+1)/2;
+      }
+      kernel_mcl_bn128_g2_reduce_sum_one_range6<<<1, 1, 0, stream>>>(partial, ranges_size, firsts, one, p, a, specialA_, mode_, rp);
+  }else{
+      kernel_mcl_bn128_g2_reduce_sum_new<threads_per_block><<<dim3(blocks_per_range, ranges_size, 1), threads_per_block, 0, stream>>>(0, 0, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, one, p, a, specialA_, mode_, t_zero, rp);
 
-  int n = blocks_per_range * INSTANCES_PER_BLOCK * ranges_size;
-  while(n>=2){
-    int half_n = n / 2;
-    int blocks = (half_n + INSTANCES_PER_BLOCK-1) / INSTANCES_PER_BLOCK;
-    kernel_mcl_bn128_g2_reduce_sum_after_new<threads_per_block><<<blocks, threads_per_block, 0, stream>>>(partial, half_n, n, one, p, a, specialA_, mode_, rp);
-    n /= 2;
+      int n = blocks_per_range * INSTANCES_PER_BLOCK * ranges_size;
+      while(n>=2){
+          int half_n = n / 2;
+          int blocks = (half_n + INSTANCES_PER_BLOCK-1) / INSTANCES_PER_BLOCK;
+          kernel_mcl_bn128_g2_reduce_sum_after_new<threads_per_block><<<blocks, threads_per_block, 0, stream>>>(partial, half_n, n, one, p, a, specialA_, mode_, rp);
+          n /= 2;
+      }
   }
   return 0;
 }
@@ -3284,6 +3418,89 @@ __global__ void kernel_mcl_bucket_reduce_g2(
   store(bn_env, data, result, start + bucket_instance);
 }
 
+template<int BlockInstances>
+__global__ void kernel_mcl_bucket_reduce_g2_new(
+    mcl_bn128_g2 data,
+    const int *starts, 
+    const int *ends,
+    const int *bucket_ids,
+    const int *bucket_tids,
+    const int total_instances,
+    mcl_bn128_g2 t_zero,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int instance = threadIdx.x + blockIdx.x * blockDim.x;
+  if(instance >= total_instances) return;
+  int bucket_id = bucket_ids[instance];
+  int start = starts[bucket_id];
+  int bucket_size = ends[bucket_id] - start;
+  if(bucket_size <= 1) return;
+
+  int half_bucket_size = (bucket_size + 1) / 2;
+  int bucket_instance = bucket_tids[instance];
+
+  using namespace BigInt256;
+  BigInt256::Point la;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+  BigInt256::Ect2 result;
+  Int256 r_x_c0, r_x_c1, r_y_c0, r_y_c1, r_z_c0, r_z_c1;
+  {
+      result.x.c0 = r_x_c0;
+      result.x.c1 = r_x_c1;
+
+      result.y.c0 = r_y_c0;
+      result.y.c1 = r_y_c1;
+
+      result.z.c0 = r_z_c0;
+      result.z.c1 = r_z_c1;
+      memcpy(result.x.c0, data.x.c0.mont_repr_data + start + bucket_instance, sizeof(BigInt256::Int256));
+      memcpy(result.x.c1, data.x.c1.mont_repr_data + start + bucket_instance, sizeof(BigInt256::Int256));
+      memcpy(result.y.c0, data.y.c0.mont_repr_data + start + bucket_instance, sizeof(BigInt256::Int256));
+      memcpy(result.y.c1, data.y.c1.mont_repr_data + start + bucket_instance, sizeof(BigInt256::Int256));
+      memcpy(result.z.c0, data.z.c0.mont_repr_data + start + bucket_instance, sizeof(BigInt256::Int256));
+      memcpy(result.z.c1, data.z.c1.mont_repr_data + start + bucket_instance, sizeof(BigInt256::Int256));
+  }
+  for(int i = bucket_instance + half_bucket_size; i < bucket_size; i+= half_bucket_size){
+    BigInt256::Ect2 other;
+    Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+    other.x.c0 = a_x_c0;
+    other.x.c1 = a_x_c1;
+    other.y.c0 = a_y_c0;
+    other.y.c1 = a_y_c1;
+    other.z.c0 = a_z_c0;
+    other.z.c1 = a_z_c1;
+    memcpy(other.x.c0, data.x.c0.mont_repr_data+start+i, sizeof(BigInt256::Int256));
+    memcpy(other.x.c1, data.x.c1.mont_repr_data+start+i, sizeof(BigInt256::Int256));
+    memcpy(other.y.c0, data.y.c0.mont_repr_data+start+i, sizeof(BigInt256::Int256));
+    memcpy(other.y.c1, data.y.c1.mont_repr_data+start+i, sizeof(BigInt256::Int256));
+    memcpy(other.z.c0, data.z.c0.mont_repr_data+start+i, sizeof(BigInt256::Int256));
+    memcpy(other.z.c1, data.z.c1.mont_repr_data+start+i, sizeof(BigInt256::Int256));
+    //other.x.c0 = (Int*)(data.x.c0.mont_repr_data + start + i);
+    //other.x.c1 = (Int*)(data.x.c1.mont_repr_data + start + i);
+
+    //other.y.c0 = (Int*)(data.y.c0.mont_repr_data + start + i);
+    //other.y.c1 = (Int*)(data.y.c1.mont_repr_data + start + i);
+
+    //other.z.c0 = (Int*)(data.z.c0.mont_repr_data + start + i);
+    //other.z.c1 = (Int*)(data.z.c1.mont_repr_data + start + i);
+    BigInt256::add_g2(result, result, other, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+  }
+  //store(bn_env, data, result, start + bucket_instance);
+  memcpy(data.x.c0.mont_repr_data + start + bucket_instance, result.x.c0, sizeof(BigInt256::Int256));
+  memcpy(data.x.c1.mont_repr_data + start + bucket_instance, result.x.c1, sizeof(BigInt256::Int256));
+  memcpy(data.y.c0.mont_repr_data + start + bucket_instance, result.y.c0, sizeof(BigInt256::Int256));
+  memcpy(data.y.c1.mont_repr_data + start + bucket_instance, result.y.c1, sizeof(BigInt256::Int256));
+  memcpy(data.z.c0.mont_repr_data + start + bucket_instance, result.z.c0, sizeof(BigInt256::Int256));
+  memcpy(data.z.c1.mont_repr_data + start + bucket_instance, result.z.c1, sizeof(BigInt256::Int256));
+}
+
 template<int Offset>
 __global__ void kernel_mcl_copy_g2(
     cgbn_error_report_t* report, 
@@ -3348,9 +3565,15 @@ void mcl_bucket_reduce_sum_g2(
     sync(stream); 
     if(total_instances == 0) break;
     const int local_instances = 64;
-    threads = local_instances * TPI;
-    blocks = (total_instances + local_instances - 1) / local_instances;
-    kernel_mcl_bucket_reduce_g2<local_instances><<<blocks, threads, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+    if(false){
+        threads = local_instances * TPI;
+        blocks = (total_instances + local_instances - 1) / local_instances;
+        kernel_mcl_bucket_reduce_g2<local_instances><<<blocks, threads, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+    }else{
+        threads = local_instances;
+        blocks = (total_instances + local_instances - 1) / local_instances;
+        kernel_mcl_bucket_reduce_g2_new<local_instances><<<blocks, threads, 0, stream>>>(data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+    }
     //CUDA_CHECK(cudaDeviceSynchronize());
     threads = 256;
     blocks = (bucket_num + threads-1) / threads;
@@ -3427,6 +3650,68 @@ __global__ void kernel_mcl_prefix_sum_pre_g2(
 }
 
 template<int BlockInstances, int ReduceDepthPerBlock>
+__global__ void kernel_mcl_prefix_sum_pre_g2_new(
+    mcl_bn128_g2 data, 
+    const int n,
+    int stride,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  //const int instance = threadIdx.x + blockDim.x * blockIdx.x;
+  const int local_instance = threadIdx.x;
+
+  int offset = blockIdx.x * ReduceDepthPerBlock;
+  int index = (local_instance + 1) * stride * 2 - 1;
+  using namespace BigInt256;
+  BigInt256::Point la;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+  if(index < ReduceDepthPerBlock && offset + index < n){
+      BigInt256::Ect2 dev_a, dev_b;
+      Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+      dev_a.x.c0 = a_x_c0;
+      dev_a.x.c1 = a_x_c1;
+      dev_a.y.c0 = a_y_c0;
+      dev_a.y.c1 = a_y_c1;
+      dev_a.z.c0 = a_z_c0;
+      dev_a.z.c1 = a_z_c1;
+      memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+      dev_b.x.c0 = b_x_c0;
+      dev_b.x.c1 = b_x_c1;
+      dev_b.y.c0 = b_y_c0;
+      dev_b.y.c1 = b_y_c1;
+      dev_b.z.c0 = b_z_c0;
+      dev_b.z.c1 = b_z_c1;
+      memcpy(dev_b.x.c0, data.x.c0.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+      memcpy(dev_b.x.c1, data.x.c1.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c0, data.y.c0.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c1, data.y.c1.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c0, data.z.c0.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c1, data.z.c1.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+
+      BigInt256::add_g2(dev_a, dev_a, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+
+      memcpy(data.x.c0.mont_repr_data + offset + index, dev_a.x.c0, sizeof(BigInt256::Int256));
+      memcpy(data.x.c1.mont_repr_data + offset + index, dev_a.x.c1, sizeof(BigInt256::Int256));
+      memcpy(data.y.c0.mont_repr_data + offset + index, dev_a.y.c0, sizeof(BigInt256::Int256));
+      memcpy(data.y.c1.mont_repr_data + offset + index, dev_a.y.c1, sizeof(BigInt256::Int256));
+      memcpy(data.z.c0.mont_repr_data + offset + index, dev_a.z.c0, sizeof(BigInt256::Int256));
+      memcpy(data.z.c1.mont_repr_data + offset + index, dev_a.z.c1, sizeof(BigInt256::Int256));
+    }
+}
+
+template<int BlockInstances, int ReduceDepthPerBlock>
 __global__ void kernel_mcl_prefix_sum_post_g2(
     cgbn_error_report_t* report, 
     mcl_bn128_g2 data, 
@@ -3470,6 +3755,77 @@ __global__ void kernel_mcl_prefix_sum_post_g2(
     }
 }
 
+template<int BlockInstances, int ReduceDepthPerBlock>
+__global__ void kernel_mcl_prefix_sum_post_g2_new(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 block_sums, 
+    const int n,
+    int stride, bool save_block_sum,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  //int instance = threadIdx.x + blockDim.x * blockIdx.x;
+  int local_instance = threadIdx.x;
+
+  using namespace BigInt256;
+  BigInt256::Point la;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+  int offset = blockIdx.x * ReduceDepthPerBlock;
+  int index = (local_instance + 1) * stride * 2 - 1;
+  if(index + stride < ReduceDepthPerBlock && offset + index + stride < n){
+      BigInt256::Ect2 dev_a, dev_b;
+      Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+      dev_a.x.c0 = a_x_c0;
+      dev_a.x.c1 = a_x_c1;
+      dev_a.y.c0 = a_y_c0;
+      dev_a.y.c1 = a_y_c1;
+      dev_a.z.c0 = a_z_c0;
+      dev_a.z.c1 = a_z_c1;
+      memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+      memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+      memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+      memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+      memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+      memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+
+      Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+      dev_b.x.c0 = b_x_c0;
+      dev_b.x.c1 = b_x_c1;
+      dev_b.y.c0 = b_y_c0;
+      dev_b.y.c1 = b_y_c1;
+      dev_b.z.c0 = b_z_c0;
+      dev_b.z.c1 = b_z_c1;
+      memcpy(dev_b.x.c0, data.x.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_b.x.c1, data.x.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c0, data.y.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c1, data.y.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c0, data.z.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c1, data.z.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+      BigInt256::add_g2(dev_a, dev_a, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+
+      memcpy(data.x.c0.mont_repr_data + offset + index + stride, dev_a.x.c0, sizeof(BigInt256::Int256));
+      memcpy(data.x.c1.mont_repr_data + offset + index + stride, dev_a.x.c1, sizeof(BigInt256::Int256));
+      memcpy(data.y.c0.mont_repr_data + offset + index + stride, dev_a.y.c0, sizeof(BigInt256::Int256));
+      memcpy(data.y.c1.mont_repr_data + offset + index + stride, dev_a.y.c1, sizeof(BigInt256::Int256));
+      memcpy(data.z.c0.mont_repr_data + offset + index + stride, dev_a.z.c0, sizeof(BigInt256::Int256));
+      memcpy(data.z.c1.mont_repr_data + offset + index + stride, dev_a.z.c1, sizeof(BigInt256::Int256));
+  }
+  if(save_block_sum && local_instance == 0){
+      memcpy(block_sums.x.c0.mont_repr_data + blockIdx.x, data.x.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.x.c1.mont_repr_data + blockIdx.x, data.x.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.y.c0.mont_repr_data + blockIdx.x, data.y.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.y.c1.mont_repr_data + blockIdx.x, data.y.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.z.c0.mont_repr_data + blockIdx.x, data.z.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.z.c1.mont_repr_data + blockIdx.x, data.z.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+  }
+}
+
 template<int Instances, int RealInstances, bool SaveBlockSum>
 __global__ void kernel_mcl_prefix_sum_g2(
     cgbn_error_report_t* report, 
@@ -3500,34 +3856,155 @@ __global__ void kernel_mcl_prefix_sum_g2(
 
     int offset = blockIdx.x * local_instances;
     for(int stride = 1; stride <= RealInstances; stride *= 2){
-            __syncthreads();
-            int index = (local_instance+1)*stride*2 - 1; 
-            if(index < Instances && offset + index < n){
-                        DevEct2 dev_a, dev_b;
-                        load(bn_env, dev_a, data, offset + index);
-                        load(bn_env, dev_b, data, offset + index - stride);
-                        add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + 2*local_instance * (N_32 * 2 + 2), nullptr, la, mode_, rp, true);  
-                        store(bn_env, data, dev_a, offset + index);
-                    }
-            __syncthreads();
+        __syncthreads();
+        int index = (local_instance+1)*stride*2 - 1; 
+        if(index < Instances && offset + index < n){
+            DevEct2 dev_a, dev_b;
+            load(bn_env, dev_a, data, offset + index);
+            load(bn_env, dev_b, data, offset + index - stride);
+            add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + 2*local_instance * (N_32 * 2 + 2), nullptr, la, mode_, rp, true);  
+            store(bn_env, data, dev_a, offset + index);
         }
+        __syncthreads();
+    }
     for (unsigned int stride = (Instances >> 1); stride > 0 ; stride>>=1) {
-            __syncthreads();
-            int index = (local_instance+1)*stride*2 - 1;
-            if(index + stride < Instances && offset + index + stride < n){
-                        DevEct2 dev_a, dev_b;
-                        load(bn_env, dev_a, data, offset + index + stride);
-                        load(bn_env, dev_b, data, offset + index);
-                        add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + 2*local_instance * (N_32 * 2 + 2), nullptr, la, mode_, rp, true);  
-                        store(bn_env, data, dev_a, offset + index + stride);
-                    }
+        __syncthreads();
+        int index = (local_instance+1)*stride*2 - 1;
+        if(index + stride < Instances && offset + index + stride < n){
+            DevEct2 dev_a, dev_b;
+            load(bn_env, dev_a, data, offset + index + stride);
+            load(bn_env, dev_b, data, offset + index);
+            add_g2(bn_env, dev_a, dev_a, dev_b, lone, lp, specialA_, cache_buf + 2*local_instance * (N_32 * 2 + 2), nullptr, la, mode_, rp, true);  
+            store(bn_env, data, dev_a, offset + index + stride);
         }
+    }
     __syncthreads();
     if(SaveBlockSum && local_instance == 0){
-            DevEct2 dev_a;
-            load(bn_env, dev_a, data, blockIdx.x * local_instances + local_instances-1);
-            store(bn_env, block_sums, dev_a, blockIdx.x);
+        DevEct2 dev_a;
+        load(bn_env, dev_a, data, blockIdx.x * local_instances + local_instances-1);
+        store(bn_env, block_sums, dev_a, blockIdx.x);
+    }
+}
+
+template<int Instances, int RealInstances, bool SaveBlockSum>
+__global__ void kernel_mcl_prefix_sum_g2_new(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 block_sums, 
+    const int n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int instance = threadIdx.x + blockIdx.x * blockDim.x;
+  int local_instance = threadIdx.x;
+  if(instance >= n) return;
+
+  using namespace BigInt256;
+  BigInt256::Point la;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+
+    int offset = blockIdx.x * Instances;
+    for(int stride = 1; stride <= RealInstances; stride *= 2){
+        __syncthreads();
+        int index = (local_instance+1)*stride*2 - 1; 
+        if(index < Instances && offset + index < n){
+            BigInt256::Ect2 dev_a, dev_b;
+            Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+            dev_a.x.c0 = a_x_c0;
+            dev_a.x.c1 = a_x_c1;
+            dev_a.y.c0 = a_y_c0;
+            dev_a.y.c1 = a_y_c1;
+            dev_a.z.c0 = a_z_c0;
+            dev_a.z.c1 = a_z_c1;
+            memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+            dev_b.x.c0 = b_x_c0;
+            dev_b.x.c1 = b_x_c1;
+            dev_b.y.c0 = b_y_c0;
+            dev_b.y.c1 = b_y_c1;
+            dev_b.z.c0 = b_z_c0;
+            dev_b.z.c1 = b_z_c1;
+            memcpy(dev_b.x.c0, data.x.c0.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+            memcpy(dev_b.x.c1, data.x.c1.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+            memcpy(dev_b.y.c0, data.y.c0.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+            memcpy(dev_b.y.c1, data.y.c1.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+            memcpy(dev_b.z.c0, data.z.c0.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+            memcpy(dev_b.z.c1, data.z.c1.mont_repr_data+offset+index-stride, sizeof(BigInt256::Int256));
+
+            BigInt256::add_g2(dev_a, dev_a, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+
+            memcpy(data.x.c0.mont_repr_data + offset + index, dev_a.x.c0, sizeof(BigInt256::Int256));
+            memcpy(data.x.c1.mont_repr_data + offset + index, dev_a.x.c1, sizeof(BigInt256::Int256));
+            memcpy(data.y.c0.mont_repr_data + offset + index, dev_a.y.c0, sizeof(BigInt256::Int256));
+            memcpy(data.y.c1.mont_repr_data + offset + index, dev_a.y.c1, sizeof(BigInt256::Int256));
+            memcpy(data.z.c0.mont_repr_data + offset + index, dev_a.z.c0, sizeof(BigInt256::Int256));
+            memcpy(data.z.c1.mont_repr_data + offset + index, dev_a.z.c1, sizeof(BigInt256::Int256));
         }
+        __syncthreads();
+    }
+    for (unsigned int stride = (Instances >> 1); stride > 0 ; stride>>=1) {
+        __syncthreads();
+        int index = (local_instance+1)*stride*2 - 1;
+        if(index + stride < Instances && offset + index + stride < n){
+            BigInt256::Ect2 dev_a, dev_b;
+            Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+            dev_a.x.c0 = a_x_c0;
+            dev_a.x.c1 = a_x_c1;
+            dev_a.y.c0 = a_y_c0;
+            dev_a.y.c1 = a_y_c1;
+            dev_a.z.c0 = a_z_c0;
+            dev_a.z.c1 = a_z_c1;
+            memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+            memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+            memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+            memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+            memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+            memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+offset+index+stride, sizeof(BigInt256::Int256));
+
+
+            Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+            dev_b.x.c0 = b_x_c0;
+            dev_b.x.c1 = b_x_c1;
+            dev_b.y.c0 = b_y_c0;
+            dev_b.y.c1 = b_y_c1;
+            dev_b.z.c0 = b_z_c0;
+            dev_b.z.c1 = b_z_c1;
+            memcpy(dev_b.x.c0, data.x.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_b.x.c1, data.x.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_b.y.c0, data.y.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_b.y.c1, data.y.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_b.z.c0, data.z.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+            memcpy(dev_b.z.c1, data.z.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+
+            BigInt256::add_g2(dev_a, dev_a, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+
+            memcpy(data.x.c0.mont_repr_data + offset + index + stride, dev_a.x.c0, sizeof(BigInt256::Int256));
+            memcpy(data.x.c1.mont_repr_data + offset + index + stride, dev_a.x.c1, sizeof(BigInt256::Int256));
+            memcpy(data.y.c0.mont_repr_data + offset + index + stride, dev_a.y.c0, sizeof(BigInt256::Int256));
+            memcpy(data.y.c1.mont_repr_data + offset + index + stride, dev_a.y.c1, sizeof(BigInt256::Int256));
+            memcpy(data.z.c0.mont_repr_data + offset + index + stride, dev_a.z.c0, sizeof(BigInt256::Int256));
+            memcpy(data.z.c1.mont_repr_data + offset + index + stride, dev_a.z.c1, sizeof(BigInt256::Int256));
+        }
+    }
+    __syncthreads();
+    if(SaveBlockSum && local_instance == 0){
+      memcpy(block_sums.x.c0.mont_repr_data + blockIdx.x, data.x.c0.mont_repr_data + blockIdx.x * Instances + Instances-1, sizeof(Int) * N);
+      memcpy(block_sums.x.c1.mont_repr_data + blockIdx.x, data.x.c1.mont_repr_data + blockIdx.x * Instances + Instances-1, sizeof(Int) * N);
+      memcpy(block_sums.y.c0.mont_repr_data + blockIdx.x, data.y.c0.mont_repr_data + blockIdx.x * Instances + Instances-1, sizeof(Int) * N);
+      memcpy(block_sums.y.c1.mont_repr_data + blockIdx.x, data.y.c1.mont_repr_data + blockIdx.x * Instances + Instances-1, sizeof(Int) * N);
+      memcpy(block_sums.z.c0.mont_repr_data + blockIdx.x, data.z.c0.mont_repr_data + blockIdx.x * Instances + Instances-1, sizeof(Int) * N);
+      memcpy(block_sums.z.c1.mont_repr_data + blockIdx.x, data.z.c1.mont_repr_data + blockIdx.x * Instances + Instances-1, sizeof(Int) * N);
+    }
 }
 
 template<int BlockInstances>
@@ -3564,6 +4041,67 @@ __global__ void kernel_mcl_add_block_sum_g2(
   store(bn_env, data, dev_a, instance + instances);
 }
 
+template<int BlockInstances>
+__global__ void kernel_mcl_add_block_sum_g2_new(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 block_sums, 
+    const int n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+    const int instances = BlockInstances;
+    int instance = blockIdx.x * blockDim.x + threadIdx.x;
+    //int local_instance = threadIdx.x;
+    if(instances + instance >= n) return;
+
+    using namespace BigInt256;
+    BigInt256::Point la;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+
+    BigInt256::Ect2 dev_a, dev_block_sum;
+    Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+    dev_a.x.c0 = a_x_c0;
+    dev_a.x.c1 = a_x_c1;
+    dev_a.y.c0 = a_y_c0;
+    dev_a.y.c1 = a_y_c1;
+    dev_a.z.c0 = a_z_c0;
+    dev_a.z.c1 = a_z_c1;
+    memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+instance+instances, sizeof(BigInt256::Int256));
+    memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+instance+instances, sizeof(BigInt256::Int256));
+    memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+instance+instances, sizeof(BigInt256::Int256));
+    memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+instance+instances, sizeof(BigInt256::Int256));
+    memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+instance+instances, sizeof(BigInt256::Int256));
+    memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+instance+instances, sizeof(BigInt256::Int256));
+
+    Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+    dev_block_sum.x.c0 = b_x_c0;
+    dev_block_sum.x.c1 = b_x_c1;
+    dev_block_sum.y.c0 = b_y_c0;
+    dev_block_sum.y.c1 = b_y_c1;
+    dev_block_sum.z.c0 = b_z_c0;
+    dev_block_sum.z.c1 = b_z_c1;
+    memcpy(dev_block_sum.x.c0, block_sums.x.c0.mont_repr_data+blockIdx.x, sizeof(BigInt256::Int256));
+    memcpy(dev_block_sum.x.c1, block_sums.x.c1.mont_repr_data+blockIdx.x, sizeof(BigInt256::Int256));
+    memcpy(dev_block_sum.y.c0, block_sums.y.c0.mont_repr_data+blockIdx.x, sizeof(BigInt256::Int256));
+    memcpy(dev_block_sum.y.c1, block_sums.y.c1.mont_repr_data+blockIdx.x, sizeof(BigInt256::Int256));
+    memcpy(dev_block_sum.z.c0, block_sums.z.c0.mont_repr_data+blockIdx.x, sizeof(BigInt256::Int256));
+    memcpy(dev_block_sum.z.c1, block_sums.z.c1.mont_repr_data+blockIdx.x, sizeof(BigInt256::Int256));
+    BigInt256::add_g2(dev_a, dev_a, dev_block_sum, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+
+    memcpy(data.x.c0.mont_repr_data + instance + instances, dev_a.x.c0, sizeof(BigInt256::Int256));
+    memcpy(data.x.c1.mont_repr_data + instance + instances, dev_a.x.c1, sizeof(BigInt256::Int256));
+    memcpy(data.y.c0.mont_repr_data + instance + instances, dev_a.y.c0, sizeof(BigInt256::Int256));
+    memcpy(data.y.c1.mont_repr_data + instance + instances, dev_a.y.c1, sizeof(BigInt256::Int256));
+    memcpy(data.z.c0.mont_repr_data + instance + instances, dev_a.z.c0, sizeof(BigInt256::Int256));
+    memcpy(data.z.c1.mont_repr_data + instance + instances, dev_a.z.c1, sizeof(BigInt256::Int256));
+}
+
 void mcl_prefix_sum_g2(
     mcl_bn128_g2 data, 
     mcl_bn128_g2 block_sums, 
@@ -3577,38 +4115,81 @@ void mcl_prefix_sum_g2(
     const uint64_t rp,
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
-  const int threads = TPI * 64;
+  int threads = TPI * 64;
   int instances = threads / TPI;//64
+  bool use_cgbn=false;
+  if(!use_cgbn){
+    threads = 64;
+    instances = 64;
+  }
   int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
   int prefix_sum_blocks2 = (prefix_sum_blocks + instances-1) / instances;//2^4
+  for(int stride = 1; stride <= 32; stride *= 2){
+      int instances = 32 / stride;
+      if(use_cgbn){
+          int threads = instances * TPI;
+          kernel_mcl_prefix_sum_pre_g2<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(report, data, n, stride, one, p, a, specialA_, mode_, rp);
+      }else{
+          int threads = instances;
+          kernel_mcl_prefix_sum_pre_g2_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, n, stride, one, p, a, specialA_, mode_, rp);
+      }
+  }
+
+  for(int stride = 32; stride > 0; stride /= 2){
+      int instances = 32 / stride;
+      bool save_block_sum = (stride == 1);
+      if(use_cgbn){
+          int threads = instances * TPI;
+          kernel_mcl_prefix_sum_post_g2<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(report, data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+      }else{
+          int threads = instances;
+          kernel_mcl_prefix_sum_post_g2_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+      }
+  }
 
   for(int stride = 1; stride <= 32; stride *= 2){
       int instances = 32 / stride;
-      int threads = instances * TPI;
-      kernel_mcl_prefix_sum_pre_g2<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(report, data, n, stride, one, p, a, specialA_, mode_, rp);
-    }
-  for(int stride = 32; stride > 0; stride /= 2){
-      int instances = 32 / stride;
-      int threads = instances * TPI;
-      bool save_block_sum = (stride == 1);
-      kernel_mcl_prefix_sum_post_g2<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(report, data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
-    }
+      if(use_cgbn){
+          int threads = instances * TPI;
+          kernel_mcl_prefix_sum_pre_g2<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(report, block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
+      }else{
+          int threads = instances;
+          kernel_mcl_prefix_sum_pre_g2_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
+      }
+  }
 
-  for(int stride = 1; stride <= 32; stride *= 2){
-      int instances = 32 / stride;
-      int threads = instances * TPI;
-      kernel_mcl_prefix_sum_pre_g2<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(report, block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
-    }
+
   for(int stride = 32; stride > 0; stride /= 2){
       int instances = 32 / stride;
-      int threads = instances * TPI;
       bool save_block_sum = (stride == 1);
-      kernel_mcl_prefix_sum_post_g2<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
-    }
+      if(use_cgbn){
+          int threads = instances * TPI;
+          kernel_mcl_prefix_sum_post_g2<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+      }else{
+          int threads = instances;
+          kernel_mcl_prefix_sum_post_g2_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+      }
+  }
   
-  kernel_mcl_prefix_sum_g2<16, 8, false><<<1, 128/2, 0, stream>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, one, p, a, specialA_, mode_, rp);
-  kernel_mcl_add_block_sum_g2<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, one, p, a, specialA_, mode_, rp);
-  kernel_mcl_add_block_sum_g2<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(report, data, block_sums, n, one, p, a, specialA_, mode_, rp);
+  use_cgbn=true;
+  threads = instances * TPI;
+  if(use_cgbn){
+      kernel_mcl_prefix_sum_g2<16, 8, false><<<1, 128/2, 0, stream>>>(report, block_sums2, block_sums2, prefix_sum_blocks2, one, p, a, specialA_, mode_, rp);
+  }else{
+      kernel_mcl_prefix_sum_g2_new<16, 8, false><<<1, 16/2, 0, stream>>>(block_sums2, block_sums2, prefix_sum_blocks2, one, p, a, specialA_, mode_, rp);
+  }
+
+
+  if(use_cgbn){
+      kernel_mcl_add_block_sum_g2<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(report, block_sums, block_sums2, prefix_sum_blocks, one, p, a, specialA_, mode_, rp);
+  }else{
+      kernel_mcl_add_block_sum_g2_new<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, one, p, a, specialA_, mode_, rp);
+  }
+  if(use_cgbn){
+      kernel_mcl_add_block_sum_g2<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(report, data, block_sums, n, one, p, a, specialA_, mode_, rp);
+  }else{
+      kernel_mcl_add_block_sum_g2_new<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(data, block_sums, n, one, p, a, specialA_, mode_, rp);
+  }
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
@@ -3649,6 +4230,70 @@ __global__ void kernel_mcl_reduce_sum_g2(
   store(bn_env, out, dev_a, instance);
 }
 
+template<int BlockInstances>
+__global__ void kernel_mcl_reduce_sum_g2_new(
+    mcl_bn128_g2 data, 
+    mcl_bn128_g2 out, 
+    const int half_n,
+    const int n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int instance = threadIdx.x + blockIdx.x * blockDim.x;
+  if(instance >= half_n) return;
+  //int local_instance = threadIdx.x;
+
+  using namespace BigInt256;
+  BigInt256::Point la;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+
+  BigInt256::Ect2 dev_a;
+  Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+  dev_a.x.c0 = a_x_c0;
+  dev_a.x.c1 = a_x_c1;
+  dev_a.y.c0 = a_y_c0;
+  dev_a.y.c1 = a_y_c1;
+  dev_a.z.c0 = a_z_c0;
+  dev_a.z.c1 = a_z_c1;
+  memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+instance, sizeof(BigInt256::Int256));
+  memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+instance, sizeof(BigInt256::Int256));
+  memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+instance, sizeof(BigInt256::Int256));
+  memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+instance, sizeof(BigInt256::Int256));
+  memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+instance, sizeof(BigInt256::Int256));
+  memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+instance, sizeof(BigInt256::Int256));
+
+  for(int i = instance + half_n; i < n; i+= half_n){
+      BigInt256::Ect2 dev_b;
+      Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+      dev_b.x.c0 = b_x_c0;
+      dev_b.x.c1 = b_x_c1;
+      dev_b.y.c0 = b_y_c0;
+      dev_b.y.c1 = b_y_c1;
+      dev_b.z.c0 = b_z_c0;
+      dev_b.z.c1 = b_z_c1;
+      memcpy(dev_b.x.c0, data.x.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.x.c1, data.x.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c0, data.y.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.y.c1, data.y.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c0, data.z.c0.mont_repr_data+i, sizeof(BigInt256::Int256));
+      memcpy(dev_b.z.c1, data.z.c1.mont_repr_data+i, sizeof(BigInt256::Int256));
+      BigInt256::add_g2(dev_a, dev_a, dev_b, (Int*)one.mont_repr_data, (Int*)p.mont_repr_data, specialA_, la, mode_, rp);  
+  }
+  //store(bn_env, out, dev_a, instance);
+  memcpy(out.x.c0.mont_repr_data + instance, dev_a.x.c0, sizeof(BigInt256::Int256));
+  memcpy(out.x.c1.mont_repr_data + instance, dev_a.x.c1, sizeof(BigInt256::Int256));
+  memcpy(out.y.c0.mont_repr_data + instance, dev_a.y.c0, sizeof(BigInt256::Int256));
+  memcpy(out.y.c1.mont_repr_data + instance, dev_a.y.c1, sizeof(BigInt256::Int256));
+  memcpy(out.z.c0.mont_repr_data + instance, dev_a.z.c0, sizeof(BigInt256::Int256));
+  memcpy(out.z.c1.mont_repr_data + instance, dev_a.z.c1, sizeof(BigInt256::Int256));
+}
+
 void mcl_bn128_g2_reduce_sum2(
     mcl_bn128_g2 data, 
     mcl_bn128_g2 out, 
@@ -3662,17 +4307,33 @@ void mcl_bn128_g2_reduce_sum2(
     CudaStream stream){
   cgbn_error_report_t *report = get_error_report();
   int len = n-1;
-  const int instances = 64;
-  int threads = instances * TPI;
-  int half_len = (len + 1) / 2;
-  int blocks = (half_len + instances - 1) / instances;
-  kernel_mcl_reduce_sum_g2<instances><<<blocks, threads, 0, stream>>>(report, data, out, half_len, len, one, p, a, specialA_, mode_, rp);
-  len = half_len;
-  while(len > 1){
-    int half_len = (len + 1) / 2;
-    int blocks = (half_len + instances - 1) / instances;
-    kernel_mcl_reduce_sum_g2<instances><<<blocks, threads, 0, stream>>>(report, out, out, half_len, len, one, p, a, specialA_, mode_, rp);
-    len = half_len;
+  const bool use_cgbn=false;
+  if(use_cgbn){
+      const int instances = 64;
+      int threads = instances * TPI;
+      int half_len = (len + 1) / 2;
+      int blocks = (half_len + instances - 1) / instances;
+      kernel_mcl_reduce_sum_g2<instances><<<blocks, threads, 0, stream>>>(report, data, out, half_len, len, one, p, a, specialA_, mode_, rp);
+      len = half_len;
+      while(len > 1){
+          int half_len = (len + 1) / 2;
+          int blocks = (half_len + instances - 1) / instances;
+          kernel_mcl_reduce_sum_g2<instances><<<blocks, threads, 0, stream>>>(report, out, out, half_len, len, one, p, a, specialA_, mode_, rp);
+          len = half_len;
+      }
+  }else{
+      const int instances = 64;
+      int threads = instances ;
+      int half_len = (len + 1) / 2;
+      int blocks = (half_len + instances - 1) / instances;
+      kernel_mcl_reduce_sum_g2_new<instances><<<blocks, threads, 0, stream>>>(data, out, half_len, len, one, p, a, specialA_, mode_, rp);
+      len = half_len;
+      while(len > 1){
+          int half_len = (len + 1) / 2;
+          int blocks = (half_len + instances - 1) / instances;
+          kernel_mcl_reduce_sum_g2_new<instances><<<blocks, threads, 0, stream>>>(out, out, half_len, len, one, p, a, specialA_, mode_, rp);
+          len = half_len;
+      }
   }
 }
 
