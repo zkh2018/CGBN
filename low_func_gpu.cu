@@ -82,9 +82,14 @@ void gpu_mcl_mul_g2(uint32_t* z, uint32_t*x, uint32_t*y, uint32_t*p, const uint6
 }
 
 void gpu_mcl_ect_add_g2(mcl_bn128_g2 R, mcl_bn128_g2 P, mcl_bn128_g2 Q, Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int model_, const uint64_t rp){
-  cgbn_error_report_t *report = nullptr;
-  CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  //cgbn_error_report_t *report = nullptr;
+  //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
+  cgbn_error_report_t *report = get_error_report();
   kernel_ect_add_g2<<<1, TPI>>>(report, R, P, Q, one, p, a, specialA_, model_, rp);
+}
+
+void gpu_mcl_ect_add_g2_new(mcl_bn128_g2 R, mcl_bn128_g2 P, mcl_bn128_g2 Q, Fp_model one, Fp_model p, Fp_model2 a, const int specialA_, const int model_, const uint64_t rp){
+  kernel_ect_add_g2_new<<<1, 1>>>(R, P, Q, one, p, a, specialA_, model_, rp);
 }
 
 } // namespace gpu

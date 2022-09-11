@@ -13,6 +13,15 @@ const int N = BITS / BASE_BITS;
 typedef uint64_t Int;
 typedef uint64_t Int256[N];
 
+inline __device__ void printInt256(const Int* x, const char* desc){
+    printf("%s:\n", desc);
+    for(int i = 0; i < 4; i++){
+        printf("%lu ", x[i]);
+    }
+    printf("\n");
+}
+
+
 inline __device__ int dev_is_zero(const Int256 x){
     for(int i = 0; i < N; i++){
         if(x[i] != 0){
@@ -721,7 +730,8 @@ struct Point {
         return (dev_is_zero(c0) && dev_is_zero(c1));
     }
     inline __device__ int is_one(const Int256 one) const {
-        return (dev_is_one(c0, one) && dev_is_one(c1, one));
+        //return (dev_is_one(c0, one) && dev_is_one(c1, one));
+        return (dev_is_one(c0, one) && dev_is_zero(c1));
     }
     inline __device__ void set(const Point& other){
         memcpy(c0, other.c0, N*sizeof(Int));
@@ -733,6 +743,18 @@ struct Point {
         dev_clear(c1);
     }
 };
+
+inline __device__ void printPoint(const Point& x, const char* desc){
+    for(int i = 0; i < 4; i++){
+        printf("%lu ", x.c0[i]);
+    }
+    printf("\n");
+    for(int i = 0; i < 4; i++){
+        printf("%lu ", x.c1[i]);
+    }
+    printf("\n");
+}
+
 
 inline __device__ void dev_mcl_add_g2(const Point& x, const Point& y, const Int256 p, Point& z){
     dev_mcl_add(x.c0, y.c0, p, z.c0);
@@ -766,11 +788,28 @@ inline __device__ void dev_fp2Dbl_mulPreW(const Point& x, const Point& y, const 
 }
 
 inline __device__ void dev_mcl_sqr_g2(const Point& x, const Int256 p, const Int rp, Point& y){
-    dev_mcl_add(x.c0, x.c1, p, y.c0);
-    dev_mcl_sub(x.c0, x.c1, p, y.c1);
-    dev_mcl_mul(y.c0, y.c1, p, rp, y.c0);
-    dev_mcl_add(x.c1, x.c1, p, y.c1);
-    dev_mcl_mul(y.c1, x.c0, p, rp, y.c1);
+    //dev_mcl_add(x.c0, x.c1, p, y.c0);
+    //dev_mcl_sub(x.c0, x.c1, p, y.c1);
+    //dev_mcl_mul(y.c0, y.c1, p, rp, y.c0);
+    //dev_mcl_add(x.c1, x.c1, p, y.c1);
+    //dev_mcl_mul(y.c1, x.c0, p, rp, y.c1);
+    Int256 t1, t2, t3;
+    dev_mcl_add(x.c1, x.c1, p, t1);
+    dev_mcl_mul(t1, x.c0, p, rp, t1);
+    dev_mcl_add(x.c0, x.c1, p, t2);
+    dev_mcl_sub(x.c0, x.c1, p, t3);
+    dev_mcl_mul(t2, t3, p, rp, y.c0);
+    memcpy(y.c1, t1, sizeof(Int256));
+}
+
+inline __device__ void dev_mcl_sqr_g2_debug(const Point& x, const Int256 p, const Int rp, Point& y){
+    Int256 t1, t2, t3;
+    dev_mcl_add(x.c1, x.c1, p, t1);
+    dev_mcl_mul(t1, x.c0, p, rp, t1);
+    dev_mcl_add(x.c0, x.c1, p, t2);
+    dev_mcl_sub(x.c0, x.c1, p, t3);
+    dev_mcl_mul(t2, t3, p, rp, y.c0);
+    memcpy(y.c1, t1, sizeof(Int256));
 }
 
 inline __device__ void dev_mcl_mul_g2(const Point& x, const Point& y, const Int256 p, const Int rp, Point& z){
@@ -823,7 +862,7 @@ struct Ect2{
     }
 
     inline __device__ void dev_dblNoVerifyInfJacobi(
-        const Ect2& P, const Int256 one, const Int256 p, const int specialA_, const Point& a_, const Int rp){
+        const Ect2& P,  const Int256 one, const Int256 p, const int specialA_, const Point& a_, const Int rp){
         Point S, M, t, y2;
         Int256 s_c0, s_c1, M_c0, M_c1, t_c0, t_c1, y2_c0, y2_c1;
         S.c0 = s_c0;
@@ -845,9 +884,13 @@ struct Ect2{
         //dev_mcl_sqr_g2(bn_env, y2, P.y, p.mont, p.ptr, cache_buf, cache_t, rp); 
         dev_mcl_sqr_g2(P.y, p, rp, y2); 
         //dev_mcl_mul_g2(bn_env, S, P.x, y2, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //printf("S = P.x*y2\n");
+        //printPoint(P.x, "");
+        //printPoint(y2, "");
         dev_mcl_mul_g2(P.x, y2, p, rp, S); 
 
-        const int isPzOne = P.z.is_zero();
+        const int isPzOne = P.z.is_one(one);
+        //printf("isPzOne=%d\n", isPzOne);
         dev_mcl_add_g2(S, S, p, S);
         dev_mcl_add_g2(S, S, p, S);
         dev_mcl_sqr_g2(P.x, p, rp, M); 
@@ -890,26 +933,30 @@ struct Ect2{
             dev_mcl_mul_g2(P.y, P.z, p, rp, this->z);
         }
         dev_mcl_add_g2(this->z, this->z, p, this->z);
-        dev_mcl_sqr_g2(y2, p, rp, y2);
+        //printf("y2 = y2^2\n");
+        //printPoint(y2, "");
+        dev_mcl_sqr_g2_debug(y2, p, rp, y2);
+        //printPoint(y2, "");
 
         dev_mcl_add_g2(y2, y2, p, y2);
         dev_mcl_add_g2(y2, y2, p, y2);
         dev_mcl_add_g2(y2, y2, p, y2);
 
+        //printf("R.y = S-R.x\n");
+        //printPoint(S, "");
+        //printPoint(this->x, "");
         dev_mcl_sub_g2(S,  this->x, p, this->y);
+        //printPoint(this->y, "");
+        //printf("R.y*m\n");
+        //printPoint(M, "");
         dev_mcl_mul_g2(this->y, M, p, rp, this->y);
+        //printPoint(this->y, "");
+        //printPoint(y2, "");
         dev_mcl_sub_g2(this->y, y2, p, this->y);
+        //printPoint(this->y, "");
     }
 
 };
-
-inline __device__ void printInt256(const Int* x, const char* desc){
-    printf("%s:\n", desc);
-    for(int i = 0; i < 4; i++){
-        printf("%lu ", x[i]);
-    }
-    printf("\n");
-}
 
 inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(
         const Ect2&P, const Ect2& Q, const int isPzOne, const int isQzOne,
@@ -1020,8 +1067,8 @@ inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(
 
 inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, const bool isPzOne, const bool isQzOne,
         const Int256 one, const Int256 p, const int specialA_, const Point& a_, const int mode_, const uint64_t rp){
-    Point r, U1, S1, H3;
-    Int256 r_c0, r_c1, U1_c0, U1_c1, S1_c0, S1_c1, H3_c0, H3_c1;
+    Point r, U1, S1, H, H3;
+    Int256 r_c0, r_c1, U1_c0, U1_c1, S1_c0, S1_c1, H3_c0, H3_c1, H_c0, H_c1;
     r.c0 = r_c0;
     r.c1 = r_c1;
 
@@ -1033,10 +1080,15 @@ inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, c
 
     H3.c0 = H3_c0;
     H3.c1 = H3_c1;
+
+    H.c0 = H_c0;
+    H.c1 = H_c1;
+
     r.clear();
     U1.clear();
     S1.clear();
     H3.clear();
+    H.clear();
     if (isPzOne) {
         // r = 1;
     } else {
@@ -1054,15 +1106,15 @@ inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, c
             //H = Q.x;
             //H.set(bn_env, Q.x);
             //R.x.copy_from(bn_env, Q.x);
-            R.x.set(Q.x);
+            H.set(Q.x);
         } else {
             //Fp::mul(H, Q.x, r);
             //dev_mcl_mul_g2(bn_env, R.x, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
-            dev_mcl_mul_g2(Q.x, r, p, rp, R.x);
+            dev_mcl_mul_g2(Q.x, r, p, rp, H);
         }
         //H -= U1;
         //dev_mcl_sub_g2(bn_env, R.x, R.x, U1, p.mont);
-        dev_mcl_sub_g2(R.x, U1, p, R.x);
+        dev_mcl_sub_g2(H, U1, p, H);
         //S1 = P.y;
         //S1.set(bn_env, P.y);
         //S1.copy_from(bn_env, P.y);
@@ -1078,15 +1130,15 @@ inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, c
             //H = Q.x;
             //H.set(bn_env, Q.x);
             //R.x.copy_from(bn_env, Q.x);
-            R.x.set(Q.x);
+            H.set(Q.x);
         } else {
             //Fp::mul(H, Q.x, r);
             //dev_mcl_mul_g2(bn_env, R.x, Q.x, r, p.mont, p.ptr, cache_buf, cache_t, rp);
-            dev_mcl_mul_g2(Q.x, r, p, rp, R.x);
+            dev_mcl_mul_g2(Q.x, r, p, rp, H);
         }
         //H -= U1;
         //dev_mcl_sub_g2(bn_env, R.x, R.x, U1, p.mont);
-        dev_mcl_sub_g2(R.x, U1, p, R.x);
+        dev_mcl_sub_g2(H, U1, p, H);
         //S1 *= Q.z;
         //dev_mcl_mul_g2(bn_env, S1, S1, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
         dev_mcl_mul_g2(S1, Q.z, p, rp, S1);
@@ -1110,7 +1162,7 @@ inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, c
     //r -= S1;
     //dev_mcl_sub_g2(bn_env, r, r, S1, p.mont);
     dev_mcl_sub_g2(r, S1, p, r);
-    if (R.x.is_zero()) {
+    if (H.is_zero()) {
         if (r.is_zero()) {
             //R.dev_dblNoVerifyInfJacobi(bn_env, P, one, p, specialA_, cache_buf, cache_t, a_, rp);
             R.dev_dblNoVerifyInfJacobi(P, one, p, specialA_, a_, rp);
@@ -1125,29 +1177,29 @@ inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, c
             //R.z = H;
             //R.z.set(bn_env, H);
             //R.z.copy_from(bn_env, R.x);
-            R.z.set(R.x);
+            R.z.set(H);
         } else {
             //Fp::mul(R.z, H, Q.z);
             //dev_mcl_mul_g2(bn_env, R.z, R.x, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
-            dev_mcl_mul_g2(R.x, Q.z, p, rp, R.z);
+            dev_mcl_mul_g2(H, Q.z, p, rp, R.z);
         }
     } else {
         if (isQzOne) {
             //Fp::mul(R.z, P.z, H);
             //dev_mcl_mul_g2(bn_env, R.z, P.z, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
-            dev_mcl_mul_g2(P.z, R.x, p, rp, R.z);
+            dev_mcl_mul_g2(P.z, H, p, rp, R.z);
         } else {
             //Fp::mul(R.z, P.z, Q.z);
             //dev_mcl_mul_g2(bn_env, R.z, P.z, Q.z, p.mont, p.ptr, cache_buf, cache_t, rp);
             dev_mcl_mul_g2(P.z, Q.z, p, rp, R.z);
             //R.z *= H;
             //dev_mcl_mul_g2(bn_env, R.z, R.z, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
-            dev_mcl_mul_g2(R.z, R.x, p, rp, R.z);
+            dev_mcl_mul_g2(R.z, H, p, rp, R.z);
         }
     }
     //Fp::sqr(H3, H); // H^2
     //dev_mcl_sqr_g2(bn_env, H3, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
-    dev_mcl_sqr_g2(R.x, p, rp, H3);
+    dev_mcl_sqr_g2(H, p, rp, H3);
     //Fp::sqr(R.y, r); // r^2
     //dev_mcl_sqr_g2(bn_env, R.y, r, p.mont, p.ptr, cache_buf, cache_t, rp);
     dev_mcl_sqr_g2(r, p, rp, R.y);
@@ -1156,7 +1208,7 @@ inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, c
     dev_mcl_mul_g2(U1, H3, p, rp, U1);
     //H3 *= H; // H^3
     //dev_mcl_mul_g2(bn_env, H3, H3, R.x, p.mont, p.ptr, cache_buf, cache_t, rp);
-    dev_mcl_mul_g2(H3, R.x, p, rp, H3);
+    dev_mcl_mul_g2(H3, H, p, rp, H3);
     //R.y -= U1;
     //dev_mcl_sub_g2(bn_env, R.y, R.y, U1, p.mont);
     dev_mcl_sub_g2(R.y, U1, p, R.y);
@@ -1198,9 +1250,9 @@ inline __device__ void add_g2(Ect2& R, const Ect2& P, const Ect2& Q,
     int isPzOne = P.z.is_one(one);//dev_is_one(bn_env, P.z.mont, one.mont);
     int isQzOne = Q.z.is_one(one);//dev_is_one(bn_env, Q.z.mont, one.mont);
     //if(!is_prefix_sum){
-        dev_addJacobi_NoPzAndNoQzOne_g2(P, Q, isPzOne, isQzOne, one, p, specialA_, a_, mode_, rp, R);
+    //    dev_addJacobi_NoPzAndNoQzOne_g2(P, Q, isPzOne, isQzOne, one, p, specialA_, a_, mode_, rp, R);
     //}else{
-    //    dev_addJacobi_g2(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
+    dev_addJacobi_g2(R, P, Q, isPzOne, isQzOne, one, p, specialA_, a_, mode_, rp);
     //}
 }
 
