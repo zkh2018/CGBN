@@ -3515,14 +3515,14 @@ __global__ void kernel_mcl_copy_g2(
   int start = starts[bid];
   int end = ends[bid];
   if(end - start == 0){
-        DevEct2 dev_zero;
-        load(bn_env, dev_zero, zero, 0);
-        store(bn_env, buckets, dev_zero, bid * Offset);
-    }else{
-          DevEct2 a;
-          load(bn_env, a, data, start);
-          store(bn_env, buckets, a, bid * Offset);
-      }
+      DevEct2 dev_zero;
+      load(bn_env, dev_zero, zero, 0);
+      store(bn_env, buckets, dev_zero, bid * Offset);
+  }else{
+      DevEct2 a;
+      load(bn_env, a, data, start);
+      store(bn_env, buckets, a, bid * Offset);
+  }
 }
 
 template<int BlockInstances>
@@ -3875,12 +3875,24 @@ __global__ void kernel_mcl_prefix_sum_post_g2_new(
       memcpy(data.z.c1.mont_repr_data + offset + index + stride, dev_a.z.c1, sizeof(BigInt256::Int256));
   }
   if(save_block_sum && local_instance == 0){
-      memcpy(block_sums.x.c0.mont_repr_data + blockIdx.x, data.x.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
-      memcpy(block_sums.x.c1.mont_repr_data + blockIdx.x, data.x.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
-      memcpy(block_sums.y.c0.mont_repr_data + blockIdx.x, data.y.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
-      memcpy(block_sums.y.c1.mont_repr_data + blockIdx.x, data.y.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
-      memcpy(block_sums.z.c0.mont_repr_data + blockIdx.x, data.z.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
-      memcpy(block_sums.z.c1.mont_repr_data + blockIdx.x, data.z.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      Int256 x_c0;
+      memcpy(x_c0, data.x.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.x.c0.mont_repr_data + blockIdx.x, x_c0, sizeof(Int256));
+      Int256 x_c1;
+      memcpy(x_c1, data.x.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.x.c1.mont_repr_data + blockIdx.x, x_c1, sizeof(Int256));
+      Int256 y_c0;
+      memcpy(y_c0, data.y.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.y.c0.mont_repr_data + blockIdx.x, y_c0, sizeof(Int256));
+      Int256 y_c1;
+      memcpy(y_c1, data.y.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.y.c1.mont_repr_data + blockIdx.x, y_c1, sizeof(Int256));
+      Int256 z_c0;
+      memcpy(z_c0, data.z.c0.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.z.c0.mont_repr_data + blockIdx.x, z_c0, sizeof(Int256));
+      Int256 z_c1;
+      memcpy(z_c1, data.z.c1.mont_repr_data + blockIdx.x * ReduceDepthPerBlock + ReduceDepthPerBlock-1, sizeof(Int) * N);
+      memcpy(block_sums.z.c1.mont_repr_data + blockIdx.x, z_c1, sizeof(Int256));
   }
 }
 
@@ -3988,6 +4000,7 @@ __global__ void kernel_mcl_prefix_sum_g2_new(
             memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
             memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
             memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+offset+index, sizeof(BigInt256::Int256));
+
             Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
             dev_b.x.c0 = b_x_c0;
             dev_b.x.c1 = b_x_c1;
@@ -4168,6 +4181,166 @@ __global__ void kernel_mcl_add_block_sum_g2_new(
     memcpy(data.z.c1.mont_repr_data + instance + instances, dev_a.z.c1, sizeof(BigInt256::Int256));
 }
 
+// blocks = 64
+__global__ void kernel_prefix_sum_pre(
+    mcl_bn128_g2 data, 
+    const int n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int tid = threadIdx.x + blockDim.x * blockIdx.x;
+  using namespace BigInt256;
+  BigInt256::Point la;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+  Int256 local_one, local_p;
+  memcpy(local_one, one.mont_repr_data, sizeof(Int256));
+  memcpy(local_p, p.mont_repr_data, sizeof(Int256));
+
+  //Ect2 a = data[tid * 64];
+  BigInt256::Ect2 dev_a;
+  Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+  dev_a.x.c0 = a_x_c0;
+  dev_a.x.c1 = a_x_c1;
+  dev_a.y.c0 = a_y_c0;
+  dev_a.y.c1 = a_y_c1;
+  dev_a.z.c0 = a_z_c0;
+  dev_a.z.c1 = a_z_c1;
+  memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+tid*64, sizeof(Int256));
+  memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+tid*64, sizeof(Int256));
+  memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+tid*64, sizeof(Int256));
+  memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+tid*64, sizeof(Int256));
+  memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+tid*64, sizeof(Int256));
+  memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+tid*64, sizeof(Int256));
+
+  BigInt256::Ect2 dev_b;
+  Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+  dev_b.x.c0 = b_x_c0;
+  dev_b.x.c1 = b_x_c1;
+  dev_b.y.c0 = b_y_c0;
+  dev_b.y.c1 = b_y_c1;
+  dev_b.z.c0 = b_z_c0;
+  dev_b.z.c1 = b_z_c1;
+  for(int i = 1; i < 64; i++){
+      //Ect2 b = data[tid * 64 + i];
+      memcpy(dev_b.x.c0, data.x.c0.mont_repr_data+tid*64+i, sizeof(Int256));
+      memcpy(dev_b.x.c1, data.x.c1.mont_repr_data+tid*64+i, sizeof(Int256));
+      memcpy(dev_b.y.c0, data.y.c0.mont_repr_data+tid*64+i, sizeof(Int256));
+      memcpy(dev_b.y.c1, data.y.c1.mont_repr_data+tid*64+i, sizeof(Int256));
+      memcpy(dev_b.z.c0, data.z.c0.mont_repr_data+tid*64+i, sizeof(Int256));
+      memcpy(dev_b.z.c1, data.z.c1.mont_repr_data+tid*64+i, sizeof(Int256));
+      //a = a+ b;
+      BigInt256::add_g2(dev_a, dev_a, dev_b, local_one, local_p, specialA_, la, mode_, rp);  
+      //data[tid * 64 + i] = a;
+      memcpy(data.x.c0.mont_repr_data + tid*64+i, dev_a.x.c0, sizeof(Int256));
+      memcpy(data.x.c1.mont_repr_data + tid*64+i, dev_a.x.c1, sizeof(Int256));
+      memcpy(data.y.c0.mont_repr_data + tid*64+i, dev_a.y.c0, sizeof(Int256));
+      memcpy(data.y.c1.mont_repr_data + tid*64+i, dev_a.y.c1, sizeof(Int256));
+      memcpy(data.z.c0.mont_repr_data + tid*64+i, dev_a.z.c0, sizeof(Int256));
+      memcpy(data.z.c1.mont_repr_data + tid*64+i, dev_a.z.c1, sizeof(Int256));
+  }
+  __syncthreads();
+  const int start = blockIdx.x * 64 * 64; 
+  for(int i = 0; i < 63; i++){
+     //Ect2 a = data[start + i * 64 + 63];
+      memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+start+i*64+63, sizeof(Int256));
+      memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+start+i*64+63, sizeof(Int256));
+      memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+start+i*64+63, sizeof(Int256));
+      memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+start+i*64+63, sizeof(Int256));
+      memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+start+i*64+63, sizeof(Int256));
+      memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+start+i*64+63, sizeof(Int256));
+     //Ect2 b = data[start + (i+1) * 64 + threadIdx.x];
+      memcpy(dev_b.x.c0, data.x.c0.mont_repr_data+start+(i+1)*64+threadIdx.x, sizeof(Int256));
+      memcpy(dev_b.x.c1, data.x.c1.mont_repr_data+start+(i+1)*64+threadIdx.x, sizeof(Int256));
+      memcpy(dev_b.y.c0, data.y.c0.mont_repr_data+start+(i+1)*64+threadIdx.x, sizeof(Int256));
+      memcpy(dev_b.y.c1, data.y.c1.mont_repr_data+start+(i+1)*64+threadIdx.x, sizeof(Int256));
+      memcpy(dev_b.z.c0, data.z.c0.mont_repr_data+start+(i+1)*64+threadIdx.x, sizeof(Int256));
+      memcpy(dev_b.z.c1, data.z.c1.mont_repr_data+start+(i+1)*64+threadIdx.x, sizeof(Int256));
+     //data[start + (i+1)*64 + threadIdx.x] = a + b;
+      BigInt256::add_g2(dev_a, dev_a, dev_b, local_one, local_p, specialA_, la, mode_, rp);  
+      memcpy(data.x.c0.mont_repr_data + start + (i+1)*64+threadIdx.x, dev_a.x.c0, sizeof(Int256));
+      memcpy(data.x.c1.mont_repr_data + start + (i+1)*64+threadIdx.x, dev_a.x.c1, sizeof(Int256));
+      memcpy(data.y.c0.mont_repr_data + start + (i+1)*64+threadIdx.x, dev_a.y.c0, sizeof(Int256));
+      memcpy(data.y.c1.mont_repr_data + start + (i+1)*64+threadIdx.x, dev_a.y.c1, sizeof(Int256));
+      memcpy(data.z.c0.mont_repr_data + start + (i+1)*64+threadIdx.x, dev_a.z.c0, sizeof(Int256));
+      memcpy(data.z.c1.mont_repr_data + start + (i+1)*64+threadIdx.x, dev_a.z.c1, sizeof(Int256));
+     __syncthreads();
+  }
+}
+
+// blocks = 1024
+__global__ void kernel_prefix_sum_post(
+    mcl_bn128_g2 data, 
+    const int n,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model2 a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  const int offset = 64 * 64;
+  using namespace BigInt256;
+  BigInt256::Point la;
+  Int256 a_c0, a_c1;
+  la.c0 = a_c0; la.c1 = a_c1;
+  memcpy(la.c0, a.c0.mont_repr_data, sizeof(Int256));
+  memcpy(la.c1, a.c1.mont_repr_data, sizeof(Int256));
+  Int256 local_one, local_p;
+  memcpy(local_one, one.mont_repr_data, sizeof(BigInt256::Int256));
+  memcpy(local_p, p.mont_repr_data, sizeof(BigInt256::Int256));
+
+  BigInt256::Ect2 dev_a;
+  Int256 a_x_c0, a_x_c1, a_y_c0, a_y_c1, a_z_c0, a_z_c1;
+  dev_a.x.c0 = a_x_c0;
+  dev_a.x.c1 = a_x_c1;
+  dev_a.y.c0 = a_y_c0;
+  dev_a.y.c1 = a_y_c1;
+  dev_a.z.c0 = a_z_c0;
+  dev_a.z.c1 = a_z_c1;
+
+  BigInt256::Ect2 dev_b;
+  Int256 b_x_c0, b_x_c1, b_y_c0, b_y_c1, b_z_c0, b_z_c1;
+  dev_b.x.c0 = b_x_c0;
+  dev_b.x.c1 = b_x_c1;
+  dev_b.y.c0 = b_y_c0;
+  dev_b.y.c1 = b_y_c1;
+  dev_b.z.c0 = b_z_c0;
+  dev_b.z.c1 = b_z_c1;
+
+    for(int i = 0; i < 15; i++){
+        //Ect2 a = data[i * offset + offset - 1];
+        memcpy(dev_a.x.c0, data.x.c0.mont_repr_data+i*offset + offset-1, sizeof(BigInt256::Int256));
+        memcpy(dev_a.x.c1, data.x.c1.mont_repr_data+i*offset + offset-1, sizeof(BigInt256::Int256));
+        memcpy(dev_a.y.c0, data.y.c0.mont_repr_data+i*offset + offset-1, sizeof(BigInt256::Int256));
+        memcpy(dev_a.y.c1, data.y.c1.mont_repr_data+i*offset + offset-1, sizeof(BigInt256::Int256));
+        memcpy(dev_a.z.c0, data.z.c0.mont_repr_data+i*offset + offset-1, sizeof(BigInt256::Int256));
+        memcpy(dev_a.z.c1, data.z.c1.mont_repr_data+i*offset + offset-1, sizeof(BigInt256::Int256));
+        for(int j = threadIdx.x; j < offset; j += blockDim.x){
+            //Ect2 b = data[(i+1)*offset + j]; 
+            memcpy(dev_b.x.c0, data.x.c0.mont_repr_data+(i+1)*offset+j, sizeof(BigInt256::Int256));
+            memcpy(dev_b.x.c1, data.x.c1.mont_repr_data+(i+1)*offset+j, sizeof(BigInt256::Int256));
+            memcpy(dev_b.y.c0, data.y.c0.mont_repr_data+(i+1)*offset+j, sizeof(BigInt256::Int256));
+            memcpy(dev_b.y.c1, data.y.c1.mont_repr_data+(i+1)*offset+j, sizeof(BigInt256::Int256));
+            memcpy(dev_b.z.c0, data.z.c0.mont_repr_data+(i+1)*offset+j, sizeof(BigInt256::Int256));
+            memcpy(dev_b.z.c1, data.z.c1.mont_repr_data+(i+1)*offset+j, sizeof(BigInt256::Int256));
+            //data[(i+1)*offset + j] = a + b;
+            BigInt256::add_g2(dev_b, dev_b, dev_a, local_one, local_p, specialA_, la, mode_, rp);  
+            memcpy(data.x.c0.mont_repr_data + (i+1)*offset+j, dev_b.x.c0, sizeof(BigInt256::Int256));
+            memcpy(data.x.c1.mont_repr_data + (i+1)*offset+j, dev_b.x.c1, sizeof(BigInt256::Int256));
+            memcpy(data.y.c0.mont_repr_data + (i+1)*offset+j, dev_b.y.c0, sizeof(BigInt256::Int256));
+            memcpy(data.y.c1.mont_repr_data + (i+1)*offset+j, dev_b.y.c1, sizeof(BigInt256::Int256));
+            memcpy(data.z.c0.mont_repr_data + (i+1)*offset+j, dev_b.z.c0, sizeof(BigInt256::Int256));
+            memcpy(data.z.c1.mont_repr_data + (i+1)*offset+j, dev_b.z.c1, sizeof(BigInt256::Int256));
+        }
+        __syncthreads();
+    }
+}
+
 void mcl_prefix_sum_g2(
     mcl_bn128_g2 data, 
     mcl_bn128_g2 block_sums, 
@@ -4180,43 +4353,53 @@ void mcl_prefix_sum_g2(
     const int mode_,
     const uint64_t rp,
     CudaStream stream){
-  cgbn_error_report_t *report = get_error_report();
-  int threads = 64;
-  int instances = threads;//64
-  int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
-  int prefix_sum_blocks2 = (prefix_sum_blocks + instances-1) / instances;//2^4
-  for(int stride = 1; stride <= 32; stride *= 2){
-      int instances = 32 / stride;
-      int threads = instances;
-      kernel_mcl_prefix_sum_pre_g2_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, n, stride, one, p, a, specialA_, mode_, rp);
+
+  if(false){
+      int threads = 64;
+      int instances = threads;//64
+      int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
+      int prefix_sum_blocks2 = (prefix_sum_blocks + instances-1) / instances;//2^4
+      for(int stride = 1; stride <= 32; stride *= 2){
+          int instances = 32 / stride;
+          int threads = instances;
+          kernel_mcl_prefix_sum_pre_g2_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, n, stride, one, p, a, specialA_, mode_, rp);
+      }
+
+      for(int stride = 32; stride > 0; stride /= 2){
+          int instances = 32 / stride;
+          int threads = instances;
+          bool save_block_sum = (stride == 1);
+          kernel_mcl_prefix_sum_post_g2_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+      }
+
+      for(int stride = 1; stride <= 32; stride *= 2){
+          int instances = 32 / stride;
+          int threads = instances;
+          kernel_mcl_prefix_sum_pre_g2_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
+      }
+
+
+      for(int stride = 32; stride > 0; stride /= 2){
+          int instances = 32 / stride;
+          int threads = instances;
+          bool save_block_sum = (stride == 1);
+          kernel_mcl_prefix_sum_post_g2_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+      }
+
+      kernel_mcl_prefix_sum_g2_new<16, 8, false><<<1, 16/2, 0, stream>>>(block_sums2, block_sums2, prefix_sum_blocks2, one, p, a, specialA_, mode_, rp);
+
+      kernel_mcl_add_block_sum_g2_new<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, one, p, a, specialA_, mode_, rp);
+
+      kernel_mcl_add_block_sum_g2_new<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(data, block_sums, n, one, p, a, specialA_, mode_, rp);
   }
 
-  for(int stride = 32; stride > 0; stride /= 2){
-      int instances = 32 / stride;
-      int threads = instances;
-      bool save_block_sum = (stride == 1);
-      kernel_mcl_prefix_sum_post_g2_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+  {
+    const int threads = 64;
+    const int blocks = n / 64 / 64;
+    //kernel_prefix_sum_pre<<<blocks, threads, 0, stream>>>(data, n, one, p, a, specialA_, mode_, rp); 
+
+    kernel_prefix_sum_post<<<1, 512, 0, stream>>>(data, n, one, p, a, specialA_, mode_, rp); 
   }
-
-  for(int stride = 1; stride <= 32; stride *= 2){
-      int instances = 32 / stride;
-      int threads = instances;
-      kernel_mcl_prefix_sum_pre_g2_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
-  }
-
-
-  for(int stride = 32; stride > 0; stride /= 2){
-      int instances = 32 / stride;
-      int threads = instances;
-      bool save_block_sum = (stride == 1);
-      kernel_mcl_prefix_sum_post_g2_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
-  }
-  
-  kernel_mcl_prefix_sum_g2_new<16, 8, false><<<1, 16/2, 0, stream>>>(block_sums2, block_sums2, prefix_sum_blocks2, one, p, a, specialA_, mode_, rp);
-
-  kernel_mcl_add_block_sum_g2_new<64><<<prefix_sum_blocks2-1, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, one, p, a, specialA_, mode_, rp);
-
-  kernel_mcl_add_block_sum_g2_new<64><<<prefix_sum_blocks-1, threads, 0, stream>>>(data, block_sums, n, one, p, a, specialA_, mode_, rp);
 }
 
 template<int BlockInstances>
