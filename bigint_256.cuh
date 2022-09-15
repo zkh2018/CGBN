@@ -22,7 +22,7 @@ inline __device__ void printInt256(const Int* x, const char* desc){
 }
 
 
-inline __device__ int dev_is_zero(const Int256 x){
+inline __device__ int dev_is_zero(const Int* x){
     for(int i = 0; i < N; i++){
         if(x[i] != 0){
             return 0;
@@ -31,7 +31,7 @@ inline __device__ int dev_is_zero(const Int256 x){
     return 1;
 }
 
-inline __device__ int dev_is_one(const Int256 x, const Int256 one){
+inline __device__ int dev_is_one(const Int* x, const Int* one){
     for(int i = 0; i < N; i++){
         if(x[i] != one[i]){
             return 0;
@@ -40,7 +40,7 @@ inline __device__ int dev_is_one(const Int256 x, const Int256 one){
     return 1;
 }
 
-inline __device__ int dev_equal(const Int256 a, const Int256 b){
+inline __device__ int dev_equal(const Int* a, const Int* b){
     for(int i = 0; i < N; i++){
         if(a[i] != b[i]){
             return 0;
@@ -49,19 +49,19 @@ inline __device__ int dev_equal(const Int256 a, const Int256 b){
     return 1;
 }
 
-inline __device__ void dev_clear(Int256 x){
+inline __device__ void dev_clear(Int* x){
     for(int i = 0; i < N; i++){
         x[i] = 0;
     }
 }
 
-inline __device__ void dev_clear_2(Int256 x){
+inline __device__ void dev_clear_2(Int* x){
     for(int i = 0; i < N*2; i++){
         x[i] = 0;
     }
 }
 
-inline __device__ int dev_is_ge(const Int256 a, const Int256 b){
+inline __device__ int dev_is_ge(const Int* a, const Int* b){
     for (int i = N-1; i >= 0; --i) {
         if (a[i] < b[i]) {
             return 0;
@@ -72,7 +72,7 @@ inline __device__ int dev_is_ge(const Int256 a, const Int256 b){
     return 1;
 }
 
-inline __device__ Int dev_add(const Int256 a, const Int256 b, Int256 c){
+inline __device__ Int dev_add(const Int* a, const Int* b, Int* c){
     Int carry_out = 0;
    asm(
       "add.cc.u64 %0, %5, %9;\n\t"
@@ -97,7 +97,7 @@ inline __device__ Int dev_add(const Int256 a, const Int256 b, Int256 c){
     return carry_out;
 }
 
-inline __device__ Int dev_sub(const Int256 a, const Int256 b, Int256 c){
+inline __device__ Int dev_sub(const Int* a, const Int* b, Int* c){
     Int borrow = 0;
    asm(
       "sub.cc.u64 %0, %5, %9;\n\t"
@@ -459,7 +459,7 @@ inline __device__ void dev_mul_wide(const uint64_t *a, const uint64_t *b, uint64
 }
 
 
-inline __device__ void dev_mont_mul(const Int256 a, const Int256 b, const Int256 modulus, const uint64_t inv, Int256 c){
+inline __device__ void dev_mont_mul(const Int* a, const Int* b, const Int* modulus, const uint64_t inv, Int* c){
     uint64_t wide_r[N*2];
     dev_mul_wide(a, b, wide_r);  
     dev_mont_mul(wide_r, modulus, inv);
@@ -477,7 +477,7 @@ inline __device__ void dev_mont_mul(const Int256 a, const Int256 b, const Int256
 }
 
 //c[N+1] = a[N] * b
-inline __device__ void dev_mul_1(const Int256 a, const Int b, Int* c){
+inline __device__ void dev_mul_1(const Int* a, const Int b, Int* c){
     asm(
         "{\n\t"
         ".reg .u64 c;\n\t"
@@ -585,7 +585,7 @@ inline __device__ Int dev_add_n(Int* x, const Int y, const int n){
     return 1;
 }
 
-inline __device__ void dev_mont_red(const Int* xy, const Int256 p, const Int rp, Int256 z){
+inline __device__ void dev_mont_red(const Int* xy, const Int* p, const Int rp, Int* z){
     Int pq[N+1];
     Int buf[N*2+1];
     memcpy(buf + N + 1, xy + N + 1, sizeof(Int) * (N-1));
@@ -624,7 +624,7 @@ inline __device__ void dev_as_bigint(const Int* x, const Int* p, const Int rp, I
 }
 
 /******mcl******/
-inline __device__ void dev_mcl_add(const Int256 a, const Int256 b, const Int256 p, Int256 c){
+inline __device__ void dev_mcl_add(const Int* a, const Int* b, const Int* p, Int* c){
     dev_add(a, b, c);
     if(c[N-1] < p[N-1]){
         return;
@@ -662,14 +662,14 @@ inline __device__ void dev_mcl_add(const Int256 a, const Int256 b, const Int256 
     }
 }
 
-inline __device__ void dev_mcl_sub(const Int256 a, const Int256 b, const Int256 p, Int256 c){
+inline __device__ void dev_mcl_sub(const Int* a, const Int* b, const Int* p, Int* c){
     int borrow = dev_sub(a, b, c);
     if(borrow){
         dev_add(c, p, c);
     }
 }
 
-inline __device__ void dev_mcl_mul(const Int256 a, const Int256 b, const Int256 p, const Int rp, Int256 c){
+inline __device__ void dev_mcl_mul(const Int* a, const Int* b, const Int* p, const Int rp, Int* c){
     Int buf[N*2+1];
     Int* ptr = buf;
     dev_mul_1(a, b[0], ptr);
@@ -689,11 +689,11 @@ inline __device__ void dev_mcl_mul(const Int256 a, const Int256 b, const Int256 
         ++ptr;
     }
     if(dev_sub(ptr, p, c)){
-        memcpy(c, ptr, N * sizeof(Int256));
+        memcpy(c, ptr, sizeof(Int256));
     }
 }
 
-inline __device__ void dev_mcl_mul_debug(const Int256 a, const Int256 b, const Int256 p, const Int rp, Int256 c){
+inline __device__ void dev_mcl_mul_debug(const Int* a, const Int* b, const Int* p, const Int rp, Int* c){
     Int buf[N*2+1];
     Int* ptr = buf;
     dev_mul_1(a, b[0], ptr);
@@ -703,34 +703,34 @@ inline __device__ void dev_mcl_mul_debug(const Int256 a, const Int256 b, const I
     Int carry = dev_add_n_1(ptr, t, ptr);
     ++ptr;
     ptr[N] = 0;
-    //for(int i = 1; i < N; i++){
-    //    ptr[N+1] = 0;
-    //    dev_mul_1(a, b[i], t);
-    //    carry = dev_add_n_1(ptr, t, ptr);
-    //    q = ptr[0] * rp;
-    //    dev_mul_1(p, q, t);
-    //    carry = dev_add_n_1(ptr, t, ptr);
-    //    ++ptr;
-    //}
-    //if(dev_sub(ptr, p, c)){
-    //    memcpy(c, ptr, N * sizeof(Int256));
-    //}
+    for(int i = 1; i < N; i++){
+        ptr[N+1] = 0;
+        dev_mul_1(a, b[i], t);
+        carry = dev_add_n_1(ptr, t, ptr);
+        q = ptr[0] * rp;
+        dev_mul_1(p, q, t);
+        carry = dev_add_n_1(ptr, t, ptr);
+        ++ptr;
+    }
+    if(dev_sub(ptr, p, c)){
+        memcpy(c, ptr, sizeof(Int256));
+    }
 }
-inline __device__ int dev_is_zero_g2(const Int256 a, const Int256 b){
+
+inline __device__ int dev_is_zero_g2(const Int* a, const Int* b){
     return dev_is_zero(a) && dev_is_zero(b);
 }
 
-inline __device__ int dev_is_one_g2(const Int256 a, const Int256 b, const Int256 one){
+inline __device__ int dev_is_one_g2(const Int* a, const Int* b, const Int* one){
     return dev_is_one(a, one) && dev_is_one(b, one);
 }
 
 struct Point {
-    Int* c0, *c1;
+    Int c0[N], c1[N];
     inline __device__ int is_zero() const {
         return (dev_is_zero(c0) && dev_is_zero(c1));
     }
-    inline __device__ int is_one(const Int256 one) const {
-        //return (dev_is_one(c0, one) && dev_is_one(c1, one));
+    inline __device__ int is_one(const Int* one) const {
         return (dev_is_one(c0, one) && dev_is_zero(c1));
     }
     inline __device__ void set(const Point& other){
@@ -741,6 +741,16 @@ struct Point {
     inline __device__ void clear(){
         dev_clear(c0);
         dev_clear(c1);
+    }
+};
+
+struct Point2 {
+    //Int* c0, *c1;
+    Int c0[N*2], c1[N*2];
+
+    inline __device__ void clear(){
+        dev_clear_2(c0);
+        dev_clear_2(c1);
     }
 };
 
@@ -756,12 +766,12 @@ inline __device__ void printPoint(const Point& x, const char* desc){
 }
 
 
-inline __device__ void dev_mcl_add_g2(const Point& x, const Point& y, const Int256 p, Point& z){
+inline __device__ void dev_mcl_add_g2(const Point& x, const Point& y, const Int* p, Point& z){
     dev_mcl_add(x.c0, y.c0, p, z.c0);
     dev_mcl_add(x.c1, y.c1, p, z.c1);
 }
 
-inline __device__ void dev_mcl_sub_g2(const Point& x, const Point& y, const Int256 p, Point& z){
+inline __device__ void dev_mcl_sub_g2(const Point& x, const Point& y, const Int* p, Point& z){
     dev_mcl_sub(x.c0, y.c0, p, z.c0);
     dev_mcl_sub(x.c1, y.c1, p, z.c1);
 }
@@ -769,7 +779,7 @@ inline __device__ void dev_mcl_sub_g2(const Point& x, const Point& y, const Int2
 //z.c0[N*2], z.c1[N*2] 
 //x.c0[N], x.c1[N]
 //y.c0[N], y.c1[N]
-inline __device__ void dev_fp2Dbl_mulPreW(const Point& x, const Point& y, const Int256 p, Point& z){
+inline __device__ void dev_fp2Dbl_mulPreW(const Point& x, const Point& y, const Int* p, Point2& z){
     dev_add(x.c0, x.c1, z.c0);
     dev_add(y.c0, y.c1, z.c0 + N);
     dev_clear_2(z.c1);
@@ -787,12 +797,7 @@ inline __device__ void dev_fp2Dbl_mulPreW(const Point& x, const Point& y, const 
     }
 }
 
-inline __device__ void dev_mcl_sqr_g2(const Point& x, const Int256 p, const Int rp, Point& y){
-    //dev_mcl_add(x.c0, x.c1, p, y.c0);
-    //dev_mcl_sub(x.c0, x.c1, p, y.c1);
-    //dev_mcl_mul(y.c0, y.c1, p, rp, y.c0);
-    //dev_mcl_add(x.c1, x.c1, p, y.c1);
-    //dev_mcl_mul(y.c1, x.c0, p, rp, y.c1);
+inline __device__ void dev_mcl_sqr_g2(const Point& x, const Int* p, const Int rp, Point& y){
     Int256 t1, t2, t3;
     dev_mcl_add(x.c1, x.c1, p, t1);
     dev_mcl_mul(t1, x.c0, p, rp, t1);
@@ -802,32 +807,40 @@ inline __device__ void dev_mcl_sqr_g2(const Point& x, const Int256 p, const Int 
     memcpy(y.c1, t1, sizeof(Int256));
 }
 
-inline __device__ void dev_mcl_sqr_g2_debug(const Point& x, const Int256 p, const Int rp, Point& y){
+inline __device__ void dev_mcl_sqr_g2_debug(const Point& x, const Int* p, const Int rp, Point& y, Point& z){
     Int256 t1, t2, t3;
+    printf("sqr 1\n");
+    printPoint(z,"");
     dev_mcl_add(x.c1, x.c1, p, t1);
+    printf("sqr 2\n");
+    printPoint(z,"");
     dev_mcl_mul(t1, x.c0, p, rp, t1);
+    printf("sqr 3\n");
+    printPoint(z,"");
     dev_mcl_add(x.c0, x.c1, p, t2);
+    printf("sqr 4\n");
+    printPoint(z,"");
     dev_mcl_sub(x.c0, x.c1, p, t3);
-    dev_mcl_mul(t2, t3, p, rp, y.c0);
+    printf("sqr 5\n");
+    printPoint(z,"");
+    dev_mcl_mul_debug(t2, t3, p, rp, y.c0);
+    printf("sqr 6\n");
+    printPoint(z,"");
     memcpy(y.c1, t1, sizeof(Int256));
+    printf("sqr 7\n");
+    printPoint(z,"");
 }
 
-inline __device__ void dev_mcl_mul_g2(const Point& x, const Point& y, const Int256 p, const Int rp, Point& z){
-    Int c0[N*2], c1[N*2];
-    Point d;
-    d.c0 = c0;
-    d.c1 = c1;
+inline __device__ void dev_mcl_mul_g2(const Point& x, const Point& y, const Int* p, const Int rp, Point& z){
+    Point2 d;
     d.clear();
     dev_fp2Dbl_mulPreW(x, y, p, d);
     dev_mont_red(d.c0, p, rp, z.c0);
     dev_mont_red(d.c1, p, rp, z.c1);
 }
 
-inline __device__ void dev_mcl_mul_g2_print(const Point& x, const Point& y, const Int256 p, const Int rp, Point& z){
-    Int c0[N*2], c1[N*2];
-    Point d;
-    d.c0 = c0;
-    d.c1 = c1;
+inline __device__ void dev_mcl_mul_g2_print(const Point& x, const Point& y, const Int* p, const Int rp, Point& z){
+    Point2 d;
     d.clear();
     dev_fp2Dbl_mulPreW(x, y, p, d);
     printf("d\n");
@@ -844,6 +857,7 @@ inline __device__ void dev_mcl_mul_g2_print(const Point& x, const Point& y, cons
     dev_mont_red(d.c0, p, rp, z.c0);
     dev_mont_red(d.c1, p, rp, z.c1);
 }
+
 struct Ect2{
     Point x, y, z;
     inline __device__ int is_zero() const {
@@ -862,21 +876,8 @@ struct Ect2{
     }
 
     inline __device__ void dev_dblNoVerifyInfJacobi(
-        const Ect2& P,  const Int256 one, const Int256 p, const int specialA_, const Point& a_, const Int rp){
+        const Ect2& P,  const Int* one, const Int* p, const int specialA_, const Point& a_, const Int rp){
         Point S, M, t, y2;
-        Int256 s_c0, s_c1, M_c0, M_c1, t_c0, t_c1, y2_c0, y2_c1;
-        S.c0 = s_c0;
-        S.c1 = s_c1;
-
-        M.c0 = M_c0;
-        M.c1 = M_c1;
-
-        t.c0 = t_c0;
-        t.c1 = t_c1;
-
-        y2.c0 = y2_c0;
-        y2.c1 = y2_c1;
-
         S.clear();
         M.clear();
         t.clear();
@@ -935,7 +936,7 @@ struct Ect2{
         dev_mcl_add_g2(this->z, this->z, p, this->z);
         //printf("y2 = y2^2\n");
         //printPoint(y2, "");
-        dev_mcl_sqr_g2_debug(y2, p, rp, y2);
+        dev_mcl_sqr_g2(y2, p, rp, y2);
         //printPoint(y2, "");
 
         dev_mcl_add_g2(y2, y2, p, y2);
@@ -960,21 +961,8 @@ struct Ect2{
 
 inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(
         const Ect2&P, const Ect2& Q, const int isPzOne, const int isQzOne,
-        const Int256 one, const Int256 p, const int specialA_, const Point& a_, const int mode_, const Int rp, Ect2& R){
+        const Int* one, const Int* p, const int specialA_, const Point& a_, const int mode_, const Int rp, Ect2& R){
     Point r, U1, H3, S1;
-    Int256 r_c0, r_c1, U1_c0, U1_c1, H3_c0, H3_c1, S1_c0, S1_c1;
-    r.c0 = r_c0;
-    r.c1 = r_c1;
-
-    U1.c0 = U1_c0;
-    U1.c1 = U1_c1;
-
-    H3.c0 = H3_c0;
-    H3.c1 = H3_c1;
-
-    S1.c0 = S1_c0;
-    S1.c1 = S1_c1;
-
     r.clear();
     U1.clear();
     H3.clear();
@@ -983,55 +971,21 @@ inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(
     dev_mcl_sqr_g2(P.z, p, rp, r);	
     //dev_mcl_mul_g2(Q.z, Q.z, p, rp, S1);
     dev_mcl_sqr_g2(Q.z, p, rp, S1);
-    //printf("S1:\n");
-    //for(int i = 0; i < 4; i++){
-    //    printf("%lu ", S1.c0[i]);
-    //}
-    //printf("\n");
-    //for(int i = 0; i < 4; i++){
-    //    printf("%lu ", S1.c1[i]);
-    //}
-    //printf("\n");
 
     dev_mcl_mul_g2(P.x, S1, p, rp, U1);
     dev_mcl_mul_g2(Q.x, r, p, rp, R.x);
     dev_mcl_mul_g2(S1, Q.z, p, rp, S1);
-    //printf("S1:\n");
-    //for(int i = 0; i < 4; i++){
-    //    printf("%lu ", S1.c0[i]);
-    //}
-    //printf("\n");
-    //for(int i = 0; i < 4; i++){
-    //    printf("%lu ", S1.c1[i]);
-    //}
-    //printf("\n");
 
     dev_mcl_sub_g2(R.x, U1, p, R.x);
 
     dev_mcl_mul_g2(r, P.z, p, rp, r);
     dev_mcl_mul_g2(S1, P.y, p, rp, S1);
-    //printf("S1:\n");
-    //for(int i = 0; i < 4; i++){
-    //    printf("%lu ", S1.c0[i]);
-    //}
-    //printf("\n");
-    //for(int i = 0; i < 4; i++){
-    //    printf("%lu ", S1.c1[i]);
-    //}
-    //printf("\n");
     dev_mcl_mul_g2(r, Q.y, p, rp, r);
 
     dev_mcl_sub_g2(r, S1, p, r);
-    //printf("r:");
-    //for(int i = 0; i < 4; i++){
-    //    printf("%lu ", r.c0[i]);
-    //}
-    //printf("\n");
 
     if(R.x.is_zero()){
-        //printf("r.x is zero\n");
         if (r.is_zero()) {
-            //printf("r is zero\n");
             R.dev_dblNoVerifyInfJacobi(P, one, p, specialA_, a_, rp);
         } else {
             R.clear();
@@ -1066,24 +1020,8 @@ inline __device__ void dev_addJacobi_NoPzAndNoQzOne_g2(
 
 
 inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, const bool isPzOne, const bool isQzOne,
-        const Int256 one, const Int256 p, const int specialA_, const Point& a_, const int mode_, const uint64_t rp){
+        const Int* one, const Int* p, const int specialA_, const Point& a_, const int mode_, const uint64_t rp){
     Point r, U1, S1, H, H3;
-    Int256 r_c0, r_c1, U1_c0, U1_c1, S1_c0, S1_c1, H3_c0, H3_c1, H_c0, H_c1;
-    r.c0 = r_c0;
-    r.c1 = r_c1;
-
-    U1.c0 = U1_c0;
-    U1.c1 = U1_c1;
-
-    S1.c0 = S1_c0;
-    S1.c1 = S1_c1;
-
-    H3.c0 = H3_c0;
-    H3.c1 = H3_c1;
-
-    H.c0 = H_c0;
-    H.c1 = H_c1;
-
     r.clear();
     U1.clear();
     S1.clear();
@@ -1233,7 +1171,7 @@ inline __device__ void dev_addJacobi_g2(Ect2& R, const Ect2& P, const Ect2& Q, c
 }
 
 inline __device__ void add_g2(Ect2& R, const Ect2& P, const Ect2& Q,
-        const Int256 one, const Int256 p, const int specialA_, const Point& a_, 
+        const Int* one, const Int* p, const int specialA_, const Point& a_, 
         const int mode_, const uint64_t rp, const bool is_prefix_sum = false){
     if(P.is_zero()){
         R.set(Q); 
@@ -1249,11 +1187,7 @@ inline __device__ void add_g2(Ect2& R, const Ect2& P, const Ect2& Q,
     }
     int isPzOne = P.z.is_one(one);//dev_is_one(bn_env, P.z.mont, one.mont);
     int isQzOne = Q.z.is_one(one);//dev_is_one(bn_env, Q.z.mont, one.mont);
-    //if(!is_prefix_sum){
-    //    dev_addJacobi_NoPzAndNoQzOne_g2(P, Q, isPzOne, isQzOne, one, p, specialA_, a_, mode_, rp, R);
-    //}else{
     dev_addJacobi_g2(R, P, Q, isPzOne, isQzOne, one, p, specialA_, a_, mode_, rp);
-    //}
 }
 
 } // namespace BigInt256
