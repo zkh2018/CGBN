@@ -623,6 +623,26 @@ inline __device__ void dev_as_bigint(const Int* x, const Int* p, const Int rp, I
     dev_mont_mul(x, one, p, rp, res);
 }
 
+struct Point {
+    Int c0[N], c1[N];
+    inline __device__ int is_zero() const {
+        return (dev_is_zero(c0) && dev_is_zero(c1));
+    }
+    inline __device__ int is_one(const Int* one) const {
+        return (dev_is_one(c0, one) && dev_is_zero(c1));
+    }
+    inline __device__ void set(const Point& other){
+        memcpy(c0, other.c0, N*sizeof(Int));
+        memcpy(c1, other.c1, N*sizeof(Int));
+    }
+
+    inline __device__ void clear(){
+        dev_clear(c0);
+        dev_clear(c1);
+    }
+};
+
+
 /******mcl******/
 inline __device__ void dev_mcl_add(const Int* a, const Int* b, const Int* p, Int* c){
     dev_add(a, b, c);
@@ -693,6 +713,284 @@ inline __device__ void dev_mcl_mul(const Int* a, const Int* b, const Int* p, con
     }
 }
 
+inline __device__ void dev_mcl_sqr(const Int* a, const Int* p, const Int rp, Int* c){
+    dev_mcl_mul(a, a, p, rp, c);
+}
+
+struct Ect{
+    Int256 x, y, z;
+    inline __device__ int is_zero() const {
+        return dev_is_zero(z);
+    }
+
+    inline __device__ void dev_dblNoVerifyInfJacobi(const Ect& P, const Int* one, const Int* p, const int specialA_, const Int* a_, const uint64_t rp) {
+        Int256 S, M, t, y2;
+        dev_clear(S);
+        dev_clear(M);
+        dev_clear(t);
+        dev_clear(y2);
+        //Fp::sqr(y2, P.y);
+        dev_mcl_sqr(P.y, p, rp, y2); 
+        //Fp::mul(S, P.x, y2);
+        dev_mcl_mul(P.x, y2, p, rp, S);
+        //const bool isPzOne = P.z.isOne();
+        const int isPzOne = dev_is_one(P.z, one);
+        //S += S;
+        dev_mcl_add(S, S, p, S);
+        //S += S;
+        dev_mcl_add(S, S, p, S);
+        //Fp::sqr(M, P.x);
+        dev_mcl_sqr(P.x, p, rp, M); 
+        switch (specialA_) {
+            case 0:
+                //Fp::add(t, M, M);
+                dev_mcl_add(M, M, p, t);
+                //M += t;
+                dev_mcl_add(M, t, p, M);
+                break;
+            case 1:
+                if (isPzOne) {
+                    //M -= P.z;
+                    dev_mcl_sub(M, P.z, p, M);
+                } else {
+                    //Fp::sqr(t, P.z);
+                    dev_mcl_sqr(P.z, p, rp, t);
+                    //Fp::sqr(t, t);
+                    dev_mcl_sqr(t, p, rp, t);
+                    //M -= t;
+                    dev_mcl_sub(M, t, p, M);
+                }
+                //Fp::add(t, M, M);
+                dev_mcl_add(M, M, p, t);
+                //M += t;
+                dev_mcl_add(M, t, p, M);
+                break;
+            case 2:
+            default:
+                if (isPzOne) {
+                    //t = a_;
+                    //t.set(a_);
+                    memcpy(t, a_, sizeof(Int256));
+                } else {
+                    //Fp::sqr(t, P.z);
+                    dev_mcl_sqr(P.z, p, rp, t);
+                    //Fp::sqr(t, t);
+                    dev_mcl_sqr(t, p, rp, t);
+                    //t *= a_;
+                    dev_mcl_mul(t, a_, p, rp, t);
+                }
+                //t += M;
+                dev_mcl_add(t, M, p, t);
+                //M += M;
+                dev_mcl_add(M, M, p, M);
+                //M += t;
+                dev_mcl_add(M, t, p, M);
+                break;
+        }
+        //Fp::sqr(R.x, M);
+        dev_mcl_sqr(M, p, rp, this->x); 
+        //R.x -= S;
+        dev_mcl_sub(this->x, S, p, this->x);
+        //R.x -= S;
+        dev_mcl_sub(this->x, S, p, this->x);
+        if (isPzOne) {
+            //R.z = P.y;
+            //this->z.set(P.y);
+            memcpy(this->z, P.y, sizeof(Int256));
+        } else {
+            //Fp::mul(R.z, P.y, P.z);
+            dev_mcl_mul(P.y, P.z, p, rp, this->z);
+        }
+        //R.z += R.z;
+        dev_mcl_add(this->z, this->z, p, this->z);
+        //Fp::sqr(y2, y2);
+        dev_mcl_sqr(y2, p, rp, y2); 
+        //y2 += y2;
+        dev_mcl_add(y2, y2, p, y2);
+        //y2 += y2;
+        dev_mcl_add(y2, y2, p, y2);
+        //y2 += y2;
+        dev_mcl_add(y2, y2, p, y2);
+        //Fp::sub(R.y, S, R.x);
+        dev_mcl_sub(S, this->x, p, this->y);
+        //R.y *= M;
+        dev_mcl_mul(this->y, M, p, rp, this->y);
+        //R.y -= y2;
+        dev_mcl_sub(this->y, y2, p, this->y);
+    }
+
+    inline __device__ void set(const Ect& other){
+        memcpy(this->x, other.x, sizeof(Int256));
+        memcpy(this->y, other.y, sizeof(Int256));
+        memcpy(this->z, other.z, sizeof(Int256));
+    }
+
+    inline __device__ void clear(){
+        dev_clear(this->x);
+        dev_clear(this->y);
+        dev_clear(this->z);
+    }
+};
+
+inline __device__ void dev_addJacobi(Ect& R, const Ect& P, const Ect& Q, const int isPzOne, const int isQzOne,
+        const Int* one, const Int* p, const int specialA_, const Int* a_, const int mode_, const uint64_t rp){
+    Int256 r, U1, S1, H, H3;
+    dev_clear(r);
+    dev_clear(U1);
+    dev_clear(S1);
+    dev_clear(H);
+    dev_clear(H3);
+    if (isPzOne) {
+        // r = 1;
+    } else {
+        //Fp::sqr(r, P.z);
+        dev_mcl_sqr(P.z, p, rp, r);
+    }
+    if (isQzOne) {
+        //U1 = P.x;
+        //U1.set(P.x);
+        memcpy(U1, P.x, sizeof(Int256));
+        if (isPzOne) {
+            //H = Q.x;
+            //H.set(Q.x);
+            memcpy(H, Q.x, sizeof(Int256));
+        } else {
+            //Fp::mul(H, Q.x, r);
+            dev_mcl_mul(Q.x, r, p, rp, H);
+        }
+        //H -= U1;
+        dev_mcl_sub(H, U1, p, H);
+        //printInt256(H, "H");
+        //S1 = P.y;
+        //S1.set(P.y);
+        memcpy(S1, P.y, sizeof(Int256));
+    } else {
+        //Fp::sqr(S1, Q.z);
+        dev_mcl_sqr(Q.z, p, rp, S1);
+        //printInt256(S1, "S1");
+        //Fp::mul(U1, P.x, S1);
+        dev_mcl_mul(P.x, S1, p, rp, U1);
+        if (isPzOne) {
+            //H = Q.x;
+            //H.set(Q.x);
+            memcpy(H, Q.x, sizeof(Int256));
+        } else {
+            //Fp::mul(H, Q.x, r);
+            dev_mcl_mul(Q.x, r, p, rp, H);
+            //printInt256(H, "H");
+        }
+        //H -= U1;
+        dev_mcl_sub(H, U1, p, H);
+        //S1 *= Q.z;
+        dev_mcl_mul(S1, Q.z, p, rp, S1);
+        //S1 *= P.y;
+        dev_mcl_mul(S1, P.y, p, rp, S1);
+        //printInt256(S1, "S1");
+    }
+    if (isPzOne) {
+        //r = Q.y;
+        //r.set(Q.y);
+        memcpy(r, Q.y, sizeof(Int256));
+    } else {
+        //r *= P.z;
+        dev_mcl_mul(r, P.z, p, rp, r);
+        //printInt256(r, "r");
+        //r *= Q.y;
+        dev_mcl_mul(r, Q.y, p, rp, r);
+        //printInt256(r, "r");
+    }
+    //r -= S1;
+    dev_mcl_sub(r, S1, p, r);
+    //if (H.is_zero()) {
+    if(dev_is_zero(H)){
+        ///printf("H is zero\n");
+        //if (r.is_zero()) {
+        if(dev_is_zero(r)){
+            //printf("r is zero\n");
+            R.dev_dblNoVerifyInfJacobi(P, one, p, specialA_, a_, rp);
+        } else {
+            R.clear();
+        }
+        return;
+    }
+    if (isPzOne) {
+        if (isQzOne) {
+            //R.z = H;
+            //R.z.set(H);
+            memcpy(R.z, H, sizeof(Int256));
+            //printInt256(R.z, "R.z");
+        } else {
+            //Fp::mul(R.z, H, Q.z);
+            dev_mcl_mul(H, Q.z, p, rp, R.z);
+        }
+    } else {
+        if (isQzOne) {
+            //Fp::mul(R.z, P.z, H);
+            dev_mcl_mul(P.z, H, p, rp, R.z);
+        } else {
+            //Fp::mul(R.z, P.z, Q.z);
+            dev_mcl_mul(P.z, Q.z, p, rp, R.z);
+            //R.z *= H;
+            dev_mcl_mul(R.z, H, p, rp, R.z);
+        }
+    }
+    //Fp::sqr(H3, H); // H^2
+    dev_mcl_sqr(H, p, rp, H3);
+    //printInt256(H, "H");
+    //printInt256(H3, "H3");
+    //Fp::sqr(R.y, r); // r^2
+    dev_mcl_sqr(r, p, rp, R.y);
+    //printInt256(r, "r");
+    //printInt256(R.y, "R.y");
+
+    ///U1 *= H3; // U1 H^2
+    dev_mcl_mul(U1, H3, p, rp, U1);
+    //H3 *= H; // H^3
+    dev_mcl_mul(H3, H, p, rp, H3);
+    //R.y -= U1;
+    dev_mcl_sub(R.y, U1, p, R.y);
+    //printInt256(R.y, "R.y");
+
+    //R.y -= U1;
+    dev_mcl_sub(R.y, U1, p, R.y);
+    //printInt256(R.y, "R.y");
+    //printInt256(H3, "H3");
+    //Fp::sub(R.x, R.y, H3);
+    dev_mcl_sub(R.y, H3, p, R.x);
+    //printInt256(R.x, "R.x");
+    //U1 -= R.x;
+    dev_mcl_sub(U1, R.x, p, U1);
+    //U1 *= r;
+    dev_mcl_mul(U1, r, p, rp, U1);
+    //H3 *= S1;
+    dev_mcl_mul(H3, S1, p, rp, H3);
+    //Fp::sub(R.y, U1, H3);
+    dev_mcl_sub(U1, H3, p, R.y);
+}
+
+inline __device__ void add(Ect& R, const Ect& P, const Ect& Q,
+        const Int* one, const Int* p, const int specialA_, const Int* a_, 
+        const int mode_, const uint64_t rp, const bool is_prefix_sum = false){
+    if(P.is_zero()){
+        R.set(Q); 
+        return;
+    }
+    if(Q.is_zero()){
+        R.set(P);
+        return;
+    }
+    if(&P == &Q){
+        R.dev_dblNoVerifyInfJacobi(P, one, p, specialA_, a_, rp);
+        return;
+    }
+    int isPzOne = dev_is_one(P.z, one);//P.z.is_one(one);
+    int isQzOne = dev_is_one(Q.z, one);//Q.z.is_one(one);
+    //printf("isPzOne=%d, isQzOne=%d\n", isPzOne, isQzOne);
+    dev_addJacobi(R, P, Q, isPzOne, isQzOne, one, p, specialA_, a_, mode_, rp);
+}
+
+
+
 inline __device__ void dev_mcl_mul_debug(const Int* a, const Int* b, const Int* p, const Int rp, Int* c){
     Int buf[N*2+1];
     Int* ptr = buf;
@@ -724,25 +1022,6 @@ inline __device__ int dev_is_zero_g2(const Int* a, const Int* b){
 inline __device__ int dev_is_one_g2(const Int* a, const Int* b, const Int* one){
     return dev_is_one(a, one) && dev_is_one(b, one);
 }
-
-struct Point {
-    Int c0[N], c1[N];
-    inline __device__ int is_zero() const {
-        return (dev_is_zero(c0) && dev_is_zero(c1));
-    }
-    inline __device__ int is_one(const Int* one) const {
-        return (dev_is_one(c0, one) && dev_is_zero(c1));
-    }
-    inline __device__ void set(const Point& other){
-        memcpy(c0, other.c0, N*sizeof(Int));
-        memcpy(c1, other.c1, N*sizeof(Int));
-    }
-
-    inline __device__ void clear(){
-        dev_clear(c0);
-        dev_clear(c1);
-    }
-};
 
 struct Point2 {
     //Int* c0, *c1;

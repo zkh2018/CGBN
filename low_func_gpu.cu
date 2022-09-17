@@ -35,6 +35,10 @@ void gpu_mcl_ect_add(mcl_bn128_g1 R, mcl_bn128_g1 P, mcl_bn128_g1 Q, Fp_model on
   cgbn_error_report_t *report = nullptr;
   CUDA_CHECK(cgbn_error_report_alloc(&report)); 
   kernel_ect_add<<<1, 8>>>(report, R, P, Q, one, p, a, specialA_, model_, rp);
+  //kernel_ect_add_new<<<1, 1>>>(R, P, Q, one, p, a, specialA_, model_, rp);
+}
+void gpu_mcl_ect_add_new(mcl_bn128_g1 R, mcl_bn128_g1 P, mcl_bn128_g1 Q, Fp_model one, Fp_model p, Fp_model a, const int specialA_, const int model_, const uint64_t rp){
+  kernel_ect_add_new<<<1, 1>>>(R, P, Q, one, p, a, specialA_, model_, rp);
 }
 
 void gpu_mcl_sub_g2(uint32_t* z, uint32_t *x, uint32_t *y, uint32_t *p){

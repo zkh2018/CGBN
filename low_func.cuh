@@ -580,11 +580,15 @@ inline __device__ void dev_addJacobi(const env_t& bn_env, DevEct& R, const DevEc
         }
         //H -= U1;
         dev_mcl_sub(bn_env, H.mont, H.mont, U1.mont, p.mont);
+        //if(threadIdx.x == 0) printf("H:\n");
+        //H.print_64(bn_env, cache_buf);
         //S1 = P.y;
         S1.set(bn_env, P.y);
     } else {
         //Fp::sqr(S1, Q.z);
         dev_mcl_sqr(bn_env, S1.mont, Q.z.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //if(threadIdx.x == 0) printf("S1:\n");
+        //S1.print_64(bn_env, cache_buf);
         //Fp::mul(U1, P.x, S1);
         dev_mcl_mul(bn_env, U1.mont, P.x.mont, S1.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
         if (isPzOne) {
@@ -593,6 +597,8 @@ inline __device__ void dev_addJacobi(const env_t& bn_env, DevEct& R, const DevEc
         } else {
             //Fp::mul(H, Q.x, r);
             dev_mcl_mul(bn_env, H.mont, Q.x.mont, r.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
+            //if(threadIdx.x == 0) printf("H:\n");
+            //H.print_64(bn_env, cache_buf);
         }
         //H -= U1;
         dev_mcl_sub(bn_env, H.mont, H.mont, U1.mont, p.mont);
@@ -600,6 +606,8 @@ inline __device__ void dev_addJacobi(const env_t& bn_env, DevEct& R, const DevEc
         dev_mcl_mul(bn_env, S1.mont, S1.mont, Q.z.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
         //S1 *= P.y;
         dev_mcl_mul(bn_env, S1.mont, S1.mont, P.y.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //if(threadIdx.x == 0) printf("S1:\n");
+        //S1.print_64(bn_env, cache_buf);
     }
     if (isPzOne) {
         //r = Q.y;
@@ -607,13 +615,19 @@ inline __device__ void dev_addJacobi(const env_t& bn_env, DevEct& R, const DevEc
     } else {
         //r *= P.z;
         dev_mcl_mul(bn_env, r.mont, r.mont, P.z.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //if(threadIdx.x == 0) printf("r:\n");
+        //r.print_64(bn_env, cache_buf);
         //r *= Q.y;
         dev_mcl_mul(bn_env, r.mont, r.mont, Q.y.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
+        //if(threadIdx.x == 0) printf("r:\n");
+        //r.print_64(bn_env, cache_buf);
     }
     //r -= S1;
     dev_mcl_sub(bn_env, r.mont, r.mont, S1.mont, p.mont);
     if (H.is_zero(bn_env)) {
+        //if(threadIdx.x == 0) printf("H is zeron");
         if (r.is_zero(bn_env)) {
+        //if(threadIdx.x == 0) printf("r is zeron");
             R.dev_dblNoVerifyInfJacobi(bn_env, P, one, p, specialA_, cache_buf, cache_t, a_, rp);
         } else {
             R.clear(bn_env);
@@ -624,6 +638,8 @@ inline __device__ void dev_addJacobi(const env_t& bn_env, DevEct& R, const DevEc
         if (isQzOne) {
             //R.z = H;
             R.z.set(bn_env, H);
+            //if(threadIdx.x == 0) printf("R.z:\n");
+            //R.z.print_64(bn_env, cache_buf);
         } else {
             //Fp::mul(R.z, H, Q.z);
             dev_mcl_mul(bn_env, R.z.mont, H.mont, Q.z.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
@@ -641,18 +657,36 @@ inline __device__ void dev_addJacobi(const env_t& bn_env, DevEct& R, const DevEc
     }
     //Fp::sqr(H3, H); // H^2
     dev_mcl_sqr(bn_env, H3.mont, H.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
+    //if(threadIdx.x == 0) printf("H:\n");
+    //H.print_64(bn_env, cache_buf);
+    //if(threadIdx.x == 0) printf("H3:\n");
+    //H3.print_64(bn_env, cache_buf);
     //Fp::sqr(R.y, r); // r^2
     dev_mcl_sqr(bn_env, R.y.mont, r.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
+
+    //if(threadIdx.x == 0) printf("r:\n");
+    //r.print_64(bn_env, cache_buf);
+    //if(threadIdx.x == 0) printf("R.y:\n");
+    //R.y.print_64(bn_env, cache_buf);
+
     ///U1 *= H3; // U1 H^2
     dev_mcl_mul(bn_env, U1.mont, U1.mont, H3.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
     //H3 *= H; // H^3
     dev_mcl_mul(bn_env, H3.mont, H3.mont, H.mont, p.mont, p.ptr, cache_buf, cache_t, rp);
     //R.y -= U1;
     dev_mcl_sub(bn_env, R.y.mont, R.y.mont, U1.mont, p.mont);
+    //if(threadIdx.x == 0) printf("R.y:\n");
+    //R.y.print_64(bn_env, cache_buf);
     //R.y -= U1;
     dev_mcl_sub(bn_env, R.y.mont, R.y.mont, U1.mont, p.mont);
+    //if(threadIdx.x == 0) printf("R.y:\n");
+    //R.y.print_64(bn_env, cache_buf);
+    //if(threadIdx.x == 0) printf("H3:\n");
+    //H3.print_64(bn_env, cache_buf);
     //Fp::sub(R.x, R.y, H3);
     dev_mcl_sub(bn_env, R.x.mont, R.y.mont, H3.mont, p.mont);
+    //if(threadIdx.x == 0) printf("R.x:\n");
+    //R.x.print_64(bn_env, cache_buf);
     //U1 -= R.x;
     dev_mcl_sub(bn_env, U1.mont, U1.mont, R.x.mont, p.mont);
     //U1 *= r;
@@ -680,6 +714,9 @@ inline __device__ void add(const env_t& bn_env, DevEct& R, const DevEct& P, cons
     }
     bool isPzOne = dev_is_one(bn_env, P.z.mont, one.mont);
     bool isQzOne = dev_is_one(bn_env, Q.z.mont, one.mont);
+    //if(threadIdx.x == 0){
+    //    printf("isPzOne=%d, isQzOne=%d\n", isPzOne, isQzOne);
+    //}
     //switch (mode_) {
     if(is_prefix_sum){
         dev_addJacobi_NoPzAndNoQzOne(bn_env, R, P, Q, isPzOne, isQzOne, one, p, specialA_, cache_buf, cache_t, a_, mode_, rp);
@@ -706,6 +743,23 @@ inline __device__ void store(const env_t& bn_env, mcl_bn128_g1& Q, const DevEct&
 inline __device__ void load(const env_t& bn_env, MclFp& Q, const Fp_model& data, const int offset){
     cgbn_load(bn_env, Q.mont, data.mont_repr_data + offset);
 }
+
+inline __device__ void load(BigInt256::Int* dst, const Fp_model& src, const int offset){
+    memcpy(dst, src.mont_repr_data + offset, sizeof(BigInt256::Int256));
+}
+
+inline __device__ void load(BigInt256::Ect& dst, const mcl_bn128_g1& src, const int offset){
+    memcpy(dst.x, src.x.mont_repr_data + offset, sizeof(BigInt256::Int256));
+    memcpy(dst.y, src.y.mont_repr_data + offset, sizeof(BigInt256::Int256));
+    memcpy(dst.z, src.z.mont_repr_data + offset, sizeof(BigInt256::Int256));
+}
+
+inline __device__ void store(mcl_bn128_g1& dst, const BigInt256::Ect& src, const int offset){
+    memcpy(dst.x.mont_repr_data + offset, src.x, sizeof(BigInt256::Int256));
+    memcpy(dst.y.mont_repr_data + offset, src.y, sizeof(BigInt256::Int256));
+    memcpy(dst.z.mont_repr_data + offset, src.z, sizeof(BigInt256::Int256));
+}
+
 
 __global__ void kernel_ect_add(
     cgbn_error_report_t* report,
@@ -736,6 +790,31 @@ __global__ void kernel_ect_add(
 
   add(bn_env, lP, lP, lQ, lone, lp, specialA_, cache_buf, nullptr, la, mode_, rp);  
   store(bn_env, R, lP, 0);
+}
+
+__global__ void kernel_ect_add_new(
+    mcl_bn128_g1 R, 
+    mcl_bn128_g1 P,
+    mcl_bn128_g1 Q,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int instance = threadIdx.x + blockIdx.x * blockDim.x;
+    using namespace BigInt256;
+  Ect lP, lQ;
+  Int256 lone, lp, la;
+  load(lP, P, 0);
+  load(lQ, Q, 0);
+
+  load(lone, one, 0); 
+  load(la, a, 0); 
+  load(lp, p, 0); 
+
+  add(lP, lP, lQ, lone, lp, specialA_, la, mode_, rp);  
+  store(R, lP, 0);
 }
 
 __global__ void kernel_mcl_bn128_g1_reduce_sum_pre(
@@ -1371,6 +1450,49 @@ __global__ void kernel_mcl_bucket_reduce_g1(
 }
 
 template<int BlockInstances>
+__global__ void kernel_mcl_bucket_reduce_g1_new(
+    mcl_bn128_g1 data,
+    const int *starts, 
+    const int *ends,
+    const int *bucket_ids,
+    const int *bucket_tids,
+    const int total_instances,
+    mcl_bn128_g1 t_zero,
+    Fp_model one, 
+    Fp_model p, 
+    Fp_model a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  int instance = threadIdx.x + blockIdx.x * blockDim.x;
+  int local_instance = threadIdx.x;
+  if(instance >= total_instances) return;
+  int bucket_id = bucket_ids[instance];
+  int start = starts[bucket_id];
+  int bucket_size = ends[bucket_id] - start;
+  if(bucket_size < 1) return;
+
+  int half_bucket_size = (bucket_size + 1) / 2;
+  int bucket_instance = bucket_tids[instance];
+
+  using namespace BigInt256;
+
+  Int256 lone, lp, la;
+  load(lone, one, 0); 
+  load(la, a, 0); 
+  load(lp, p, 0); 
+
+  Ect result;
+  load(result, data, start + bucket_instance);
+  for(int i = bucket_instance + half_bucket_size; i < bucket_size; i+= half_bucket_size){
+      Ect other;
+      load(other, data, start + i);
+      add(result, result, other, lone, lp, specialA_, la, mode_, rp);  
+  }
+  store(data, result, start + bucket_instance);
+}
+
+template<int BlockInstances>
 __global__ void kernel_mcl_bucket_reduce_g1_test(
     cgbn_error_report_t* report, 
     mcl_bn128_g1 data,
@@ -1548,7 +1670,13 @@ void mcl_bucket_reduce_sum(
           const int local_instances = 64;
           threads = local_instances * TPI;
           blocks = (total_instances + local_instances - 1) / local_instances;
-          kernel_mcl_bucket_reduce_g1<local_instances><<<blocks, threads, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+          if(false){
+              kernel_mcl_bucket_reduce_g1<local_instances><<<blocks, threads, 0, stream>>>(report, data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+          }else{
+              threads = local_instances;
+              blocks = (total_instances + local_instances - 1) / local_instances;
+              kernel_mcl_bucket_reduce_g1_new<local_instances><<<blocks, threads, 0, stream>>>(data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+          }
           //CUDA_CHECK(cudaDeviceSynchronize());
           threads = 256;
           blocks = (bucket_num + threads-1) / threads;
