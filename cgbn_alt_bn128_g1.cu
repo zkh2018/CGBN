@@ -2074,15 +2074,16 @@ __global__ void kernel_calc_H_new(
     const int instance = threadIdx.x + blockIdx.x * blockDim.x;
     if(instance >= n) return;
 
+    using namespace BigInt256;
     Fp local_modulus; 
-    local_modulus.load(modulus);
+    local_modulus.load((Int*)modulus);
 
     Fp dev_a, dev_b, dev_c, dev_out, dev_coset;
     dev_coset.load((Int*)Z_inverse_at_coset.mont_repr_data);
     dev_a.load((Int*)(A.mont_repr_data + instance));
     dev_b.load((Int*)(B.mont_repr_data + instance));
     dev_c.load((Int*)(C.mont_repr_data + instance));
-    DevFp tmp = dev_a.mul(dev_b, local_modulus, inv);
+    Fp tmp = dev_a.mul(dev_b, local_modulus, inv);
     dev_out = tmp.sub(dev_c, local_modulus);
     dev_out = dev_out.mul(dev_coset, local_modulus, inv);
     dev_out.store((Int*)(out.mont_repr_data + instance));

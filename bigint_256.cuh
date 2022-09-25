@@ -122,6 +122,7 @@ inline __device__ Int dev_sub(const Int* a, const Int* b, Int* c){
     return 1-borrow;
 }
 
+//a[N+1] - b[N] => c[N]
 inline __device__ Int dev_sub2(const Int* a, const Int* b, Int* c){
     Int borrow = 0;
    asm(
@@ -191,6 +192,7 @@ inline __device__ Int dev_sub_wide(const Int* a, const Int* b, Int* c){
     return 1-borrow;
 }
 
+//mont mul
 inline __device__ void dev_mont_mul(uint64_t *wide_r, const uint64_t *modulus, const uint64_t inv){
     uint64_t k = wide_r[0] * inv;
     uint64_t carry = 0;
@@ -378,6 +380,7 @@ inline __device__ void dev_mont_mul(uint64_t *wide_r, const uint64_t *modulus, c
     //memcpy(ret, wide_r + 4, sizeof(uint64_t) * 4);
 }
 
+//c[2*N] = a[N] * b[N]
 inline __device__ void dev_mul_wide(const uint64_t *a, const uint64_t *b, uint64_t *c){
     //uint64_t r[N * 2] = {0};
     asm(
