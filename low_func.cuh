@@ -1039,10 +1039,8 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_one_range5_new(
     const int specialA_,
     const int mode_,
     const uint64_t rp){
-  const int local_instance = threadIdx.x;//0~63
   const int instance = threadIdx.x + blockIdx.x * blockDim.x;
 
-  const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * BlockInstances;
   const int first = firsts[range_id_offset + blockIdx.y];
   const int second = seconds[range_id_offset + blockIdx.y];
   const int reduce_depth = second - first;//30130
@@ -1195,10 +1193,8 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_one_range7_new(
     const int specialA_,
     const int mode_,
     const uint64_t rp){
-  const int local_instance = threadIdx.x;//0~63
   const int instance = threadIdx.x + blockIdx.x * blockDim.x;
 
-  const int instance_offset = (range_id_offset + blockIdx.y) * gridDim.x * BlockInstances;
   const int first = firsts[range_id_offset + blockIdx.y];
   const int second = seconds[range_id_offset + blockIdx.y];
   const int reduce_depth = second - first;//30130
@@ -1281,8 +1277,6 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_one_range6_new(
     const int specialA_,
     const int mode_,
     const uint64_t rp){
-  int instance = threadIdx.x;
-
   using namespace BigInt256;
   Int256 lone, lp, la;
   load(lone, one, 0); 

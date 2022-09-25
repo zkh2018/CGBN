@@ -122,6 +122,33 @@ inline __device__ Int dev_sub(const Int* a, const Int* b, Int* c){
     return 1-borrow;
 }
 
+inline __device__ Int dev_sub2(const Int* a, const Int* b, Int* c){
+    Int borrow = 0;
+   asm(
+      "sub.cc.u64 %0, %6, %10;\n\t"
+      "subc.cc.u64 %1, %7, %11;\n\t"
+      "subc.cc.u64 %2, %8, %12;\n\t"
+      "subc.cc.u64 %3, %9, %13;\n\t"
+      "subc.cc.u64 %4, 0, 0;\n\t"
+      "addc.u64 %5, 0, 0;\n\t"
+      : "=l"(c[0]),
+      "=l"(c[1]),
+      "=l"(c[2]),
+      "=l"(c[3]),
+      "=l"(c[4]),
+      "=l"(borrow)
+      : "l"(a[0]),
+      "l"(a[1]),
+      "l"(a[2]),
+      "l"(a[3]),
+      "l"(b[0]),
+      "l"(b[1]),
+      "l"(b[2]),
+      "l"(b[3])
+    );
+    return 1-borrow;
+}
+
 //c[N*2] = a[N*2] - b[N*2]
 inline __device__ Int dev_sub_wide(const Int* a, const Int* b, Int* c){
     Int borrow = 0;
@@ -622,6 +649,76 @@ inline __device__ void dev_as_bigint(const Int* x, const Int* p, const Int rp, I
     one[0] = 1;
     dev_mont_mul(x, one, p, rp, res);
 }
+
+struct Fp {
+    Int data[N];
+    inline __device__ void load(const Int* src){
+        memcpy(data, src, sizeof(Int) * N);
+    }
+
+    inline __device__ void set(const Fp& other){
+        memcpy(data, other.data, sizeof(Int)*N);
+    }
+
+    inline __device__ void store(Int* dst){
+        memcpy(dst, data, sizeof(Int) * N);
+    }
+
+    inline __device__ Fp add(const Fp& other, const Fp& modulus){
+        Int scratch[N+1];
+        const Int carry = dev_add(data, other.data, scratch);
+        scratch[N] = carry;
+        if(carry || dev_is_ge(scratch, modulus.data)){
+            dev_sub2(scratch, modulus.data, scratch);
+        }
+        Fp ret;
+        memcpy(ret.data, scratch, sizeof(Int256));
+        return ret;
+    }
+
+    inline __device__ Fp sub(const Fp& other, const Fp& modulus){
+        Int scratch[N+1];
+        if(dev_is_ge(data, other.data) == 0){
+            const Int carry = dev_add(data, modulus.data, scratch);
+            scratch[N] = carry;
+        }else{
+            memcpy(scratch, data, sizeof(Int256));
+            scratch[N] = 0;
+        }
+        dev_sub2(scratch, other.data, scratch);
+        Fp ret;
+        memcpy(ret.data, scratch, sizeof(Int256));
+        return ret;
+    }
+
+    inline __device__ Fp mul(const Fp& other, const Fp& modulus, const Int inv){
+        Fp ret;
+        dev_mont_mul(this->data, other.data, modulus.data, inv, ret.data);
+        return ret;
+    }
+
+    inline __device__ Fp sqr(const Fp& modulus, const Int inv){
+        return mul(*this, modulus, inv);
+    }
+
+    inline __device__ Fp power(const Fp& one, Int exponent, const Fp& modulus, const Int inv, const int gmp_num_bits){
+        Fp result;
+        result.set(one);
+        bool found_one = false;
+        //gmp_num_bits=64
+        for(int i = gmp_num_bits-1; i >= 0; i--){
+            if(found_one){
+                result = result.mul(result, modulus, inv);
+            }
+            bool test_bit = ((exponent & (1<<i)) != 0);
+            if(test_bit){
+                found_one = true;
+                result = result.mul(*this, modulus, inv); 
+            }
+        }
+        return result;
+    }
+};
 
 struct Point {
     Int c0[N], c1[N];

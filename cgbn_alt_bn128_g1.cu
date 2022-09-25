@@ -1,6 +1,7 @@
 
 #include "cgbn_alt_bn128_g1.h"
 #include "cgbn_alt_bn128_g1.cuh"
+#include "bigint_256.cuh"
 
 #include <algorithm>
 
@@ -1379,6 +1380,59 @@ __global__ void kernel_butterfly_2(
     }
 }
 
+template<int BlockInstances>
+__global__ void kernel_butterfly_2_new(
+        Fp_model out,
+        Fp_model twiddles, 
+        const int twiddle_offset,
+        const int *strides, 
+        const uint32_t stage_length, 
+        const int* out_offsets, 
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+    if(instance >= n) return;
+
+    using namespace BigInt256;
+    Fp local_max_value, local_modulus;
+    local_max_value.load((Int*)max_value);
+    local_modulus.load((Int*)modulus);
+
+    uint32_t out_offset = out_offsets[instance];
+    uint32_t out_offset2 = out_offset + stage_length;
+    Fp out1, out2;
+    //FieldT t = out[out_offset2];
+    out2.load((Int*)(out.mont_repr_data + out_offset2));
+    out1.load((Int*)(out.mont_repr_data + out_offset));
+    //out[out_offset2] = out[out_offset] - t;
+    Fp tmp_out2 = out1.sub(out2, local_modulus);
+    tmp_out2.store((Int*)(out.mont_repr_data + out_offset2));
+    //out[out_offset] += t;
+    Fp tmp_out = out1.add(out2, local_modulus); 
+    tmp_out.store((Int*)(out.mont_repr_data + out_offset));
+    out_offset2++;
+    out_offset++;
+    for (unsigned int k = 1; k < stage_length; k++){
+        //FieldT t = twiddles[k] * out[out_offset2];
+        out2.load((Int*)(out.mont_repr_data + out_offset2));
+        out1.load((Int*)(out.mont_repr_data + out_offset));
+        Fp twiddle;
+        twiddle.load((Int*)(twiddles.mont_repr_data + twiddle_offset + k));
+        Fp t = twiddle.mul(out2, local_modulus, inv);
+        //out[out_offset2] = out[out_offset] - t;
+        tmp_out2 = out1.sub(t, local_modulus);
+        tmp_out2.store((Int*)(out.mont_repr_data + out_offset2));
+        //out[out_offset] += t;
+        tmp_out = out1.add(t, local_modulus);
+        tmp_out.store((Int*)(out.mont_repr_data + out_offset));
+        out_offset2++;
+        out_offset++;
+    }
+}
+
+
 void butterfly_2(
         Fp_model out,
         Fp_model twiddles, 
@@ -1394,9 +1448,10 @@ void butterfly_2(
     //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
     cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
-    int threads = instances * TPI;
+    int threads = instances;
     int blocks = (n + instances - 1) / instances;
-    kernel_butterfly_2<instances><<<blocks, threads>>>(report, 
+    //kernel_butterfly_2<instances><<<blocks, threads>>>(report, 
+    kernel_butterfly_2_new<instances><<<blocks, threads>>>(
             out, 
             twiddles, 
             twiddle_offset,
@@ -1544,6 +1599,134 @@ __global__ void kernel_butterfly_4(
 
 }
 
+template<int BlockInstances>
+__global__ void kernel_butterfly_4_new(
+        Fp_model out,
+        Fp_model twiddles, 
+        const int twiddles_len,
+        const int twiddle_offset,
+        const int* strides, 
+        const uint32_t stage_length, 
+        const int* out_offsets, 
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+    if(instance >= n) return;
+    using namespace BigInt256;
+    Fp local_modulus;
+    local_modulus.load((Int*)modulus);
+
+    const int real_instance = instance / stage_length;
+    const int stage_instance = instance % stage_length;
+    uint32_t out_offset = out_offsets[real_instance] + stage_instance;
+    //uint32_t stride = strides[instance];
+
+    Fp j;
+    j.load((Int*)(twiddles.mont_repr_data + twiddle_offset + twiddles_len-1));
+    uint32_t tw = stage_instance * 3;
+    /* Case twiddle == one */
+    if(false){
+		const unsigned i0  = out_offset;
+        const unsigned i1  = out_offset + stage_length;
+        const unsigned i2  = out_offset + stage_length*2;
+        const unsigned i3  = out_offset + stage_length*3;
+
+		Fp z0, z1, z2, z3;
+        //const FieldT z0  = out[i0];
+        z0.load((Int*)(out.mont_repr_data + i0));
+        //const FieldT z1  = out[i1];
+        z1.load((Int*)(out.mont_repr_data + i1));
+        //const FieldT z2  = out[i2];
+        z2.load((Int*)(out.mont_repr_data + i2));
+        //const FieldT z3  = out[i3];
+        z3.load((Int*)(out.mont_repr_data + i3));
+
+        Fp t1, t2, t3, t4, t4j;
+        //const FieldT t1  = z0 + z2;
+        t1 = z0.add(z2, local_modulus);
+        //const FieldT t2  = z1 + z3;
+        t2 = z1.add(z3, local_modulus);
+        //const FieldT t3  = z0 - z2;
+        t3 = z0.sub(z2, local_modulus);
+        //const FieldT t4j = j * (z1 - z3);
+        t4 = z1.sub(z3, local_modulus);
+        t4j = j.mul(t4, local_modulus, inv);
+
+        Fp out0, out1, out2, out3;
+        //out[i0] = t1 + t2;
+        out0 = t1.add(t2, local_modulus);
+        out0.store((Int*)(out.mont_repr_data + i0));
+        //out[i1] = t3 - t4j;
+        out1 = t3.sub(t4j, local_modulus);
+        out1.store((Int*)(out.mont_repr_data + i1));
+        //out[i2] = t1 - t2;
+        out2 = t1.sub(t2, local_modulus);
+        out2.store((Int*)(out.mont_repr_data + i2));
+        //out[i3] = t3 + t4j;
+        out3 = t3.add(t4j, local_modulus);
+        out3.store((Int*)(out.mont_repr_data + i3));
+
+        out_offset++;
+        tw += 3;
+    }
+
+	//for (unsigned int k = 0; k < stage_length; k++)
+	{
+		const unsigned i0  = out_offset;
+		const unsigned i1  = out_offset + stage_length;
+		const unsigned i2  = out_offset + stage_length*2;
+		const unsigned i3  = out_offset + stage_length*3;
+
+        Fp z0, z1, z2, z3;
+        Fp out0, out1, out2, out3;
+		//const FieldT z0  = out[i0];
+        z0.load((Int*)(out.mont_repr_data + i0));
+        out1.load((Int*)(out.mont_repr_data + i1));
+        out2.load((Int*)(out.mont_repr_data + i2));
+        out3.load((Int*)(out.mont_repr_data + i3));
+        Fp tw0, tw1, tw2;
+        tw0.load((Int*)(twiddles.mont_repr_data + twiddle_offset + tw));
+        tw1.load((Int*)(twiddles.mont_repr_data + twiddle_offset + tw+1));
+        tw2.load((Int*)(twiddles.mont_repr_data + twiddle_offset + tw+2));
+		//const FieldT z1  = out[i1] * twiddles[tw];
+        z1 = out1.mul(tw0, local_modulus, inv);
+		//const FieldT z2  = out[i2] * twiddles[tw+1];
+        z2 = out2.mul(tw1, local_modulus, inv);
+		//const FieldT z3  = out[i3] * twiddles[tw+2];
+        z3 = out3.mul(tw2, local_modulus, inv);
+
+        Fp t1, t2, t3, t4, t4j;
+		//const FieldT t1  = z0 + z2;
+        t1 = z0.add(z2, local_modulus);
+		//const FieldT t2  = z1 + z3;
+        t2 = z1.add(z3, local_modulus);
+		//const FieldT t3  = z0 - z2;
+        t3 = z0.sub(z2, local_modulus);
+		//const FieldT t4j = j * (z1 - z3);
+        t4 = z1.sub(z3, local_modulus);
+        t4j = j.mul(t4, local_modulus, inv);
+
+		//out[i0] = t1 + t2;
+        out0 = t1.add(t2, local_modulus);
+        out0.store((Int*)(out.mont_repr_data + i0));
+		//out[i1] = t3 - t4j;
+        out1 = t3.sub(t4j, local_modulus);
+        out1.store((Int*)(out.mont_repr_data + i1));
+		//out[i2] = t1 - t2;
+        out2 = t1.sub(t2, local_modulus);
+        out2.store((Int*)(out.mont_repr_data + i2));
+		//out[i3] = t3 + t4j;
+        out3 = t3.add(t4j, local_modulus);
+        out3.store((Int*)(out.mont_repr_data + i3));
+
+		//out_offset++;
+		//tw += 3;
+	}
+
+}
+
 void butterfly_4(
         Fp_model out,
         Fp_model twiddles, 
@@ -1560,10 +1743,10 @@ void butterfly_4(
     //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
     cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
-    int threads = instances * TPI;
+    int threads = instances;
     const int total_n = n * stage_length;
     int blocks = (total_n + instances - 1) / instances;
-    kernel_butterfly_4<instances><<<blocks, threads>>>(report, 
+    kernel_butterfly_4_new<instances><<<blocks, threads>>>(
             out, 
             twiddles, 
             twiddles_len,
@@ -1618,6 +1801,42 @@ __global__ void kernel_multiply_by_coset_and_constant(
     }
 }
 
+template<int BlockInstances>
+__global__ void kernel_multiply_by_coset_and_constant_new(
+        Fp_model inputs,
+        const int n,
+        Fp_model g,
+        Fp_model c, 
+        Fp_model one,
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv,
+        const int gmp_num_bits){
+    const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+    if(instance >= n) return;
+
+    using namespace BigInt256;
+    Fp local_modulus;
+    local_modulus.load((Int*)modulus);
+
+    Fp dev_c, dev_g, dev_one;
+    dev_c.load((Int*)c.mont_repr_data);
+    dev_g.load((Int*)g.mont_repr_data);
+    dev_one.load((Int*)one.mont_repr_data);
+    if(instance == 0){
+        Fp a0;
+        a0.load((Int*)inputs.mont_repr_data);
+        a0 = a0.mul(dev_c, local_modulus, inv);
+        a0.store((Int*)(inputs.mont_repr_data));
+    }else{
+        Fp tmp = dev_g.power(dev_one, instance, local_modulus, inv, gmp_num_bits);
+        Fp u = dev_c.mul(tmp, local_modulus, inv);
+        Fp ai;
+        ai.load((Int*)(inputs.mont_repr_data + instance));
+        ai = ai.mul(u, local_modulus, inv);
+        ai.store((Int*)(inputs.mont_repr_data + instance));
+    }
+}
+
 void multiply_by_coset_and_constant(
         Fp_model inputs,
         const int n,
@@ -1630,9 +1849,9 @@ void multiply_by_coset_and_constant(
     cgbn_error_report_t *report = get_error_report();
     //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
     const int instances = 64;
-    int threads = instances * TPI;
+    int threads = instances;
     int blocks = (n + instances - 1) / instances;
-    kernel_multiply_by_coset_and_constant<instances><<<blocks, threads>>>(report, inputs, n, g, c, one, modulus, inv, gmp_num_bits); 
+    kernel_multiply_by_coset_and_constant_new<instances><<<blocks, threads>>>(inputs, n, g, c, one, modulus, inv, gmp_num_bits); 
     //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
@@ -1668,6 +1887,30 @@ __global__ void kernel_calc_xor(
     xor_result.store(bn_env, xor_results, instance+offset);
 }
 
+template<int BlockInstances>
+__global__ void kernel_calc_xor_new(
+        Fp_model xor_results,
+        const int n,
+        const int offset,
+        Fp_model g,
+        Fp_model one,
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv,
+        const int gmp_num_bits){
+    const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+    if(instance >= n-1) return;
+
+    using namespace BigInt256;
+    Fp local_modulus;
+    local_modulus.load((Int*)modulus);
+
+    Fp dev_g, dev_one;
+    dev_g.load((Int*)(g.mont_repr_data));
+    dev_one.load((Int*)one.mont_repr_data);
+    Fp xor_result = dev_g.power(dev_one, instance + offset, local_modulus, inv, gmp_num_bits);
+    xor_result.store((Int*)(xor_results.mont_repr_data + instance+offset));
+}
+
 //xor_result = g^i
 void calc_xor(
         Fp_model xor_results,
@@ -1680,9 +1923,9 @@ void calc_xor(
         const int gmp_num_bits){
     cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
-    int threads = instances * TPI;
+    int threads = instances;
     int blocks = (n + instances - 1) / instances;
-    kernel_calc_xor<instances><<<blocks, threads>>>(report, xor_results, n, offset, g, one, modulus, inv, gmp_num_bits); 
+    kernel_calc_xor_new<instances><<<blocks, threads>>>(xor_results, n, offset, g, one, modulus, inv, gmp_num_bits); 
 }
 
 template<int BlockInstances>
@@ -1727,6 +1970,40 @@ __global__ void kernel_multiply(
     }
 }
 
+template<int BlockInstances>
+__global__ void kernel_multiply_new(
+        Fp_model inputs,
+        Fp_model xor_results,
+        const int n,
+        const int offset,
+        Fp_model c, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+    if(instance >= n) return;
+
+    using namespace BigInt256;
+    Fp local_modulus;
+    local_modulus.load((Int*)modulus);
+
+    Fp dev_c;
+    dev_c.load((Int*)(c.mont_repr_data));
+    if(instance == 0){
+        Fp a0;
+        a0.load((Int*)inputs.mont_repr_data);
+        a0 = a0.mul(dev_c, local_modulus, inv);
+        a0.store((Int*)inputs.mont_repr_data);
+    }else{
+        Fp xor_result;
+        xor_result.load((Int*)(xor_results.mont_repr_data + instance));
+        Fp u = dev_c.mul(xor_result, local_modulus, inv);
+        Fp ai;
+        ai.load((Int*)(inputs.mont_repr_data + instance));
+        ai = ai.mul(u, local_modulus, inv);
+        ai.store((Int*)(inputs.mont_repr_data + instance));
+    }
+}
+
 //inputs[0] *= c
 //inputs[i] *= xor_results[i]
 void multiply(
@@ -1739,9 +2016,9 @@ void multiply(
         const uint64_t inv){
     cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
-    int threads = instances * TPI;
+    int threads = instances;
     int blocks = (n + instances - 1) / instances;
-    kernel_multiply<instances><<<blocks, threads>>>(report, inputs, xor_results, n, offset, c, modulus, inv); 
+    kernel_multiply_new<instances><<<blocks, threads>>>(inputs, xor_results, n, offset, c, modulus, inv); 
 }
 
 
@@ -1783,6 +2060,34 @@ __global__ void kernel_calc_H(
     dev_out.store(bn_env, out, instance);
 }
 
+template<int BlockInstances>
+__global__ void kernel_calc_H_new(
+        Fp_model A,
+        Fp_model B,
+        Fp_model C,
+        Fp_model out,
+        Fp_model Z_inverse_at_coset,
+        const int n,
+        cgbn_mem_t<BITS>* max_value, 
+        cgbn_mem_t<BITS>* modulus, 
+        const uint64_t inv){
+    const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+    if(instance >= n) return;
+
+    Fp local_modulus; 
+    local_modulus.load(modulus);
+
+    Fp dev_a, dev_b, dev_c, dev_out, dev_coset;
+    dev_coset.load((Int*)Z_inverse_at_coset.mont_repr_data);
+    dev_a.load((Int*)(A.mont_repr_data + instance));
+    dev_b.load((Int*)(B.mont_repr_data + instance));
+    dev_c.load((Int*)(C.mont_repr_data + instance));
+    DevFp tmp = dev_a.mul(dev_b, local_modulus, inv);
+    dev_out = tmp.sub(dev_c, local_modulus);
+    dev_out = dev_out.mul(dev_coset, local_modulus, inv);
+    dev_out.store((Int*)(out.mont_repr_data + instance));
+}
+
 //out[i] = ((A[i] * B[i]) - C[i]) * Z_inverse_at_coset
 void calc_H(
         Fp_model A,
@@ -1796,9 +2101,9 @@ void calc_H(
         const uint64_t inv){
     cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
-    int threads = instances * TPI;
+    int threads = instances;
     int blocks = (n + instances - 1) / instances;
-    kernel_calc_H<instances><<<blocks, threads>>>(report, A, B, C, out, Z_inverse_at_coset, n, max_value, modulus, inv); 
+    kernel_calc_H_new<instances><<<blocks, threads>>>(A, B, C, out, Z_inverse_at_coset, n, max_value, modulus, inv); 
 }
 
 
