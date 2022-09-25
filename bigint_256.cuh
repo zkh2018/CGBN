@@ -1160,9 +1160,9 @@ inline __device__ void dev_mcl_sub_g2(const Point& x, const Point& y, const Int*
 //y.c0[N], y.c1[N]
 inline __device__ void dev_fp2Dbl_mulPreW(const Point& x, const Point& y, const Int* p, Point2& z){
     dev_add(x.c0, x.c1, z.c0);
-    dev_add(y.c0, y.c1, z.c0 + N);
+    dev_add(y.c0, y.c1, &z.c0[N]);
     dev_clear_2(z.c1);
-    dev_mul_wide(z.c0, z.c0+N, z.c1);
+    dev_mul_wide(z.c0, &z.c0[N], z.c1);
     Int d2[2*N] = {0};
     dev_mul_wide(x.c1, y.c1, d2);
     dev_clear_2(z.c0);
@@ -1172,7 +1172,7 @@ inline __device__ void dev_fp2Dbl_mulPreW(const Point& x, const Point& y, const 
     dev_sub_wide(z.c1, z.c0, z.c1);
 
     if(dev_sub_wide(z.c0, d2, z.c0)){
-        dev_add(z.c0 + N, p, z.c0 + N);
+        dev_add(&z.c0[N], p, &z.c0[N]);
     }
 }
 

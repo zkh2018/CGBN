@@ -1322,65 +1322,6 @@ void fft_copy(
 }
 
 template<int BlockInstances>
-__global__ void kernel_butterfly_2(
-        cgbn_error_report_t* report,
-        Fp_model out,
-        Fp_model twiddles, 
-        const int twiddle_offset,
-        const int *strides, 
-        const uint32_t stage_length, 
-        const int* out_offsets, 
-        const int n,
-        cgbn_mem_t<BITS>* max_value, 
-        cgbn_mem_t<BITS>* modulus, 
-        const uint64_t inv){
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    const int instance = tid/TPI;
-    const int local_instance = threadIdx.x / TPI;
-    if(instance >= n) return;
-    context_t bn_context(cgbn_report_monitor, report, instance);
-    env_t          bn_env(bn_context.env<env_t>());  
-    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
-    uint32_t *res = &cache[local_instance * 3 * BITS/32];
-    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
-    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
-    env_t::cgbn_t local_max_value, local_modulus;
-    cgbn_load(bn_env, local_max_value, max_value);
-    cgbn_load(bn_env, local_modulus, modulus);
-
-    uint32_t out_offset = out_offsets[instance];
-    uint32_t out_offset2 = out_offset + stage_length;
-    DevFp out1, out2;
-    //FieldT t = out[out_offset2];
-    out2.load(bn_env, out, out_offset2);
-    out1.load(bn_env, out, out_offset);
-    //out[out_offset2] = out[out_offset] - t;
-    DevFp tmp_out2 = out1.sub(bn_env, out2, local_max_value, local_modulus);
-    tmp_out2.store(bn_env, out, out_offset2);
-    //out[out_offset] += t;
-    DevFp tmp_out = out1.add(bn_env, out2, local_max_value, local_modulus); 
-    tmp_out.store(bn_env, out, out_offset);
-    out_offset2++;
-    out_offset++;
-    for (unsigned int k = 1; k < stage_length; k++){
-        //FieldT t = twiddles[k] * out[out_offset2];
-        out2.load(bn_env, out, out_offset2);
-        out1.load(bn_env, out, out_offset);
-        DevFp twiddle;
-        twiddle.load(bn_env, twiddles, twiddle_offset + k);
-        DevFp t = twiddle.mul(bn_env, out2, res, buffer, local_modulus, inv);
-        //out[out_offset2] = out[out_offset] - t;
-        tmp_out2 = out1.sub(bn_env, t, local_max_value, local_modulus);
-        tmp_out2.store(bn_env, out, out_offset2);
-        //out[out_offset] += t;
-        tmp_out = out1.add(bn_env, t, local_max_value, local_modulus);
-        tmp_out.store(bn_env, out, out_offset);
-        out_offset2++;
-        out_offset++;
-    }
-}
-
-template<int BlockInstances>
 __global__ void kernel_butterfly_2_new(
         Fp_model out,
         Fp_model twiddles, 
@@ -1444,13 +1385,9 @@ void butterfly_2(
         cgbn_mem_t<BITS>* max_value, 
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv){
-    //cgbn_error_report_t *report;
-    //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
-    cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
     int threads = instances;
     int blocks = (n + instances - 1) / instances;
-    //kernel_butterfly_2<instances><<<blocks, threads>>>(report, 
     kernel_butterfly_2_new<instances><<<blocks, threads>>>(
             out, 
             twiddles, 
@@ -1458,145 +1395,6 @@ void butterfly_2(
             strides, 
             stage_length, 
             out_offsets, n, max_value, modulus, inv);
-    //CUDA_CHECK(cudaDeviceSynchronize());
-
-}
-
-template<int BlockInstances>
-__global__ void kernel_butterfly_4(
-        cgbn_error_report_t* report,
-        Fp_model out,
-        Fp_model twiddles, 
-        const int twiddles_len,
-        const int twiddle_offset,
-        const int* strides, 
-        const uint32_t stage_length, 
-        const int* out_offsets, 
-        const int n,
-        cgbn_mem_t<BITS>* max_value, 
-        cgbn_mem_t<BITS>* modulus, 
-        const uint64_t inv){
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    const int instance = tid/TPI;
-    const int local_instance = threadIdx.x / TPI;
-    if(instance >= n) return;
-    context_t bn_context(cgbn_report_monitor, report, instance);
-    env_t          bn_env(bn_context.env<env_t>());  
-    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
-    uint32_t *res = &cache[local_instance * 3 * BITS/32];
-    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
-    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
-    env_t::cgbn_t local_max_value, local_modulus;
-    cgbn_load(bn_env, local_max_value, max_value);
-    cgbn_load(bn_env, local_modulus, modulus);
-
-    const int real_instance = instance / stage_length;
-    const int stage_instance = instance % stage_length;
-    uint32_t out_offset = out_offsets[real_instance] + stage_instance;
-    //uint32_t stride = strides[instance];
-
-    DevFp j;
-    j.load(bn_env, twiddles, twiddle_offset + twiddles_len-1);
-    uint32_t tw = stage_instance * 3;
-    /* Case twiddle == one */
-    if(false){
-		const unsigned i0  = out_offset;
-        const unsigned i1  = out_offset + stage_length;
-        const unsigned i2  = out_offset + stage_length*2;
-        const unsigned i3  = out_offset + stage_length*3;
-
-		DevFp z0, z1, z2, z3;
-        //const FieldT z0  = out[i0];
-        z0.load(bn_env, out, i0);
-        //const FieldT z1  = out[i1];
-        z1.load(bn_env, out, i1);
-        //const FieldT z2  = out[i2];
-        z2.load(bn_env, out, i2);
-        //const FieldT z3  = out[i3];
-        z3.load(bn_env, out, i3);
-
-        DevFp t1, t2, t3, t4, t4j;
-        //const FieldT t1  = z0 + z2;
-        t1 = z0.add(bn_env, z2, local_max_value, local_modulus);
-        //const FieldT t2  = z1 + z3;
-        t2 = z1.add(bn_env, z3, local_max_value, local_modulus);
-        //const FieldT t3  = z0 - z2;
-        t3 = z0.sub(bn_env, z2, local_max_value, local_modulus);
-        //const FieldT t4j = j * (z1 - z3);
-        t4 = z1.sub(bn_env, z3, local_max_value, local_modulus);
-        t4j = j.mul(bn_env, t4, res, buffer, local_modulus, inv);
-
-        DevFp out0, out1, out2, out3;
-        //out[i0] = t1 + t2;
-        out0 = t1.add(bn_env, t2, local_max_value, local_modulus);
-        out0.store(bn_env, out, i0);
-        //out[i1] = t3 - t4j;
-        out1 = t3.sub(bn_env, t4j, local_max_value, local_modulus);
-        out1.store(bn_env, out, i1);
-        //out[i2] = t1 - t2;
-        out2 = t1.sub(bn_env, t2, local_max_value, local_modulus);
-        out2.store(bn_env, out, i2);
-        //out[i3] = t3 + t4j;
-        out3 = t3.add(bn_env, t4j, local_max_value, local_modulus);
-        out3.store(bn_env, out, i3);
-
-        out_offset++;
-        tw += 3;
-    }
-
-	//for (unsigned int k = 0; k < stage_length; k++)
-	{
-		const unsigned i0  = out_offset;
-		const unsigned i1  = out_offset + stage_length;
-		const unsigned i2  = out_offset + stage_length*2;
-		const unsigned i3  = out_offset + stage_length*3;
-
-        DevFp z0, z1, z2, z3;
-        DevFp out0, out1, out2, out3;
-		//const FieldT z0  = out[i0];
-        z0.load(bn_env, out, i0);
-        out1.load(bn_env, out, i1);
-        out2.load(bn_env, out, i2);
-        out3.load(bn_env, out, i3);
-        DevFp tw0, tw1, tw2;
-        tw0.load(bn_env, twiddles, twiddle_offset + tw);
-        tw1.load(bn_env, twiddles, twiddle_offset + tw+1);
-        tw2.load(bn_env, twiddles, twiddle_offset + tw+2);
-		//const FieldT z1  = out[i1] * twiddles[tw];
-        z1 = out1.mul(bn_env, tw0, res, buffer, local_modulus, inv);
-		//const FieldT z2  = out[i2] * twiddles[tw+1];
-        z2 = out2.mul(bn_env, tw1, res, buffer, local_modulus, inv);
-		//const FieldT z3  = out[i3] * twiddles[tw+2];
-        z3 = out3.mul(bn_env, tw2, res, buffer, local_modulus, inv);
-
-        DevFp t1, t2, t3, t4, t4j;
-		//const FieldT t1  = z0 + z2;
-        t1 = z0.add(bn_env, z2, local_max_value, local_modulus);
-		//const FieldT t2  = z1 + z3;
-        t2 = z1.add(bn_env, z3, local_max_value, local_modulus);
-		//const FieldT t3  = z0 - z2;
-        t3 = z0.sub(bn_env, z2, local_max_value, local_modulus);
-		//const FieldT t4j = j * (z1 - z3);
-        t4 = z1.sub(bn_env, z3, local_max_value, local_modulus);
-        t4j = j.mul(bn_env, t4, res, buffer, local_modulus, inv);
-
-		//out[i0] = t1 + t2;
-        out0 = t1.add(bn_env, t2, local_max_value, local_modulus);
-        out0.store(bn_env, out, i0);
-		//out[i1] = t3 - t4j;
-        out1 = t3.sub(bn_env, t4j, local_max_value, local_modulus);
-        out1.store(bn_env, out, i1);
-		//out[i2] = t1 - t2;
-        out2 = t1.sub(bn_env, t2, local_max_value, local_modulus);
-        out2.store(bn_env, out, i2);
-		//out[i3] = t3 + t4j;
-        out3 = t3.add(bn_env, t4j, local_max_value, local_modulus);
-        out3.store(bn_env, out, i3);
-
-		//out_offset++;
-		//tw += 3;
-	}
-
 }
 
 template<int BlockInstances>
@@ -1739,9 +1537,6 @@ void butterfly_4(
         cgbn_mem_t<BITS>* max_value, 
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv){
-    //cgbn_error_report_t *report;
-    //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
-    cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
     int threads = instances;
     const int total_n = n * stage_length;
@@ -1755,50 +1550,6 @@ void butterfly_4(
             stage_length, 
             out_offsets, total_n, max_value, modulus, inv);
     //CUDA_CHECK(cudaDeviceSynchronize());
-}
-
-template<int BlockInstances>
-__global__ void kernel_multiply_by_coset_and_constant(
-        cgbn_error_report_t* report,
-        Fp_model inputs,
-        const int n,
-        Fp_model g,
-        Fp_model c, 
-        Fp_model one,
-        cgbn_mem_t<BITS>* modulus, 
-        const uint64_t inv,
-        const int gmp_num_bits){
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    const int instance = tid / TPI;
-    const int local_instance = threadIdx.x / TPI;
-    if(instance >= n) return;
-
-    context_t bn_context(cgbn_report_monitor, report, instance);
-    env_t          bn_env(bn_context.env<env_t>());  
-    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
-    uint32_t *res = &cache[local_instance * 3 * BITS/32];
-    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
-    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
-    env_t::cgbn_t local_modulus;
-    cgbn_load(bn_env, local_modulus, modulus);
-
-    DevFp dev_c, dev_g, dev_one;
-    dev_c.load(bn_env, c, 0);
-    dev_g.load(bn_env, g, 0);
-    dev_one.load(bn_env, one, 0);
-    if(instance == 0){
-        DevFp a0;
-        a0.load(bn_env, inputs, 0);
-        a0 = a0.mul(bn_env, dev_c, res, buffer, local_modulus, inv);
-        a0.store(bn_env, inputs, 0);
-    }else{
-        DevFp tmp = dev_g.power(bn_env, dev_one, instance, res, buffer, local_modulus, inv, gmp_num_bits);
-        DevFp u = dev_c.mul(bn_env, tmp, res, buffer, local_modulus, inv);
-        DevFp ai;
-        ai.load(bn_env, inputs, instance);
-        ai = ai.mul(bn_env, u, res, buffer, local_modulus, inv);
-        ai.store(bn_env, inputs, instance);
-    }
 }
 
 template<int BlockInstances>
@@ -1846,45 +1597,12 @@ void multiply_by_coset_and_constant(
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv,
         const int gmp_num_bits){
-    cgbn_error_report_t *report = get_error_report();
     //CUDA_CHECK(cgbn_error_report_alloc(&report)); 
     const int instances = 64;
     int threads = instances;
     int blocks = (n + instances - 1) / instances;
     kernel_multiply_by_coset_and_constant_new<instances><<<blocks, threads>>>(inputs, n, g, c, one, modulus, inv, gmp_num_bits); 
     //CUDA_CHECK(cudaDeviceSynchronize());
-}
-
-template<int BlockInstances>
-__global__ void kernel_calc_xor(
-        cgbn_error_report_t* report,
-        Fp_model xor_results,
-        const int n,
-        const int offset,
-        Fp_model g,
-        Fp_model one,
-        cgbn_mem_t<BITS>* modulus, 
-        const uint64_t inv,
-        const int gmp_num_bits){
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    const int instance = tid / TPI;
-    const int local_instance = threadIdx.x / TPI;
-    if(instance >= n-1) return;
-
-    context_t bn_context(cgbn_report_monitor, report, instance);
-    env_t          bn_env(bn_context.env<env_t>());  
-    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
-    uint32_t *res = &cache[local_instance * 3 * BITS/32];
-    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
-    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
-    env_t::cgbn_t local_modulus;
-    cgbn_load(bn_env, local_modulus, modulus);
-
-    DevFp dev_g, dev_one;
-    dev_g.load(bn_env, g, 0);
-    dev_one.load(bn_env, one, 0);
-    DevFp xor_result = dev_g.power(bn_env, dev_one, instance + offset, res, buffer, local_modulus, inv, gmp_num_bits);
-    xor_result.store(bn_env, xor_results, instance+offset);
 }
 
 template<int BlockInstances>
@@ -1921,53 +1639,10 @@ void calc_xor(
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv,
         const int gmp_num_bits){
-    cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
     int threads = instances;
     int blocks = (n + instances - 1) / instances;
     kernel_calc_xor_new<instances><<<blocks, threads>>>(xor_results, n, offset, g, one, modulus, inv, gmp_num_bits); 
-}
-
-template<int BlockInstances>
-__global__ void kernel_multiply(
-        cgbn_error_report_t* report,
-        Fp_model inputs,
-        Fp_model xor_results,
-        const int n,
-        const int offset,
-        Fp_model c, 
-        cgbn_mem_t<BITS>* modulus, 
-        const uint64_t inv){
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    const int instance = tid / TPI;
-    const int local_instance = threadIdx.x / TPI;
-    if(instance >= n) return;
-
-    context_t bn_context(cgbn_report_monitor, report, instance);
-    env_t          bn_env(bn_context.env<env_t>());  
-    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
-    uint32_t *res = &cache[local_instance * 3 * BITS/32];
-    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
-    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
-    env_t::cgbn_t local_modulus;
-    cgbn_load(bn_env, local_modulus, modulus);
-
-    DevFp dev_c;
-    dev_c.load(bn_env, c, 0);
-    if(instance == 0){
-        DevFp a0;
-        a0.load(bn_env, inputs, 0);
-        a0 = a0.mul(bn_env, dev_c, res, buffer, local_modulus, inv);
-        a0.store(bn_env, inputs, 0);
-    }else{
-        DevFp xor_result;
-        xor_result.load(bn_env, xor_results, instance);
-        DevFp u = dev_c.mul(bn_env, xor_result, res, buffer, local_modulus, inv);
-        DevFp ai;
-        ai.load(bn_env, inputs, instance);
-        ai = ai.mul(bn_env, u, res, buffer, local_modulus, inv);
-        ai.store(bn_env, inputs, instance);
-    }
 }
 
 template<int BlockInstances>
@@ -2014,51 +1689,12 @@ void multiply(
         Fp_model c, 
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv){
-    cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
     int threads = instances;
     int blocks = (n + instances - 1) / instances;
     kernel_multiply_new<instances><<<blocks, threads>>>(inputs, xor_results, n, offset, c, modulus, inv); 
 }
 
-
-template<int BlockInstances>
-__global__ void kernel_calc_H(
-        cgbn_error_report_t* report,
-        Fp_model A,
-        Fp_model B,
-        Fp_model C,
-        Fp_model out,
-        Fp_model Z_inverse_at_coset,
-        const int n,
-        cgbn_mem_t<BITS>* max_value, 
-        cgbn_mem_t<BITS>* modulus, 
-        const uint64_t inv){
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    const int instance = tid / TPI;
-    const int local_instance = threadIdx.x / TPI;
-    if(instance >= n) return;
-
-    context_t bn_context(cgbn_report_monitor, report, instance);
-    env_t          bn_env(bn_context.env<env_t>());  
-    __shared__ uint32_t cache[BlockInstances * 3 * BITS/32];
-    uint32_t *res = &cache[local_instance * 3 * BITS/32];
-    __shared__ uint32_t cache_buffer[BlockInstances * BITS/32];
-    uint32_t *buffer = &cache_buffer[local_instance * BITS/32];
-    env_t::cgbn_t local_modulus, local_max_value; 
-    cgbn_load(bn_env, local_modulus, modulus);
-    cgbn_load(bn_env, local_max_value, max_value);
-
-    DevFp dev_a, dev_b, dev_c, dev_out, dev_coset;
-    dev_coset.load(bn_env, Z_inverse_at_coset, 0);
-    dev_a.load(bn_env, A, instance);
-    dev_b.load(bn_env, B, instance);
-    dev_c.load(bn_env, C, instance);
-    DevFp tmp = dev_a.mul(bn_env, dev_b, res, buffer, local_modulus, inv);
-    dev_out = tmp.sub(bn_env, dev_c, local_max_value, local_modulus);
-    dev_out = dev_out.mul(bn_env, dev_coset, res, buffer, local_modulus, inv);
-    dev_out.store(bn_env, out, instance);
-}
 
 template<int BlockInstances>
 __global__ void kernel_calc_H_new(
@@ -2100,7 +1736,6 @@ void calc_H(
         cgbn_mem_t<BITS>* max_value, 
         cgbn_mem_t<BITS>* modulus, 
         const uint64_t inv){
-    cgbn_error_report_t *report = get_error_report();
     const int instances = 64;
     int threads = instances;
     int blocks = (n + instances - 1) / instances;
