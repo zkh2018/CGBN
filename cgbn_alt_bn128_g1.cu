@@ -1277,7 +1277,6 @@ void fft_internal(
 
 
 __global__ void kernel_fft_copy(
-    cgbn_error_report_t* report,
     Fp_model in,
     Fp_model out,
     const int *in_offsets,
@@ -1285,21 +1284,18 @@ __global__ void kernel_fft_copy(
     const int *strides,
     const int n,
     const int radix){
-    const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    const int instance = tid/TPI;
-    context_t bn_context(cgbn_report_monitor, report, instance);
-    env_t          bn_env(bn_context.env<env_t>());  
-
+    const int instance = threadIdx.x + blockIdx.x * blockDim.x;
     if(instance >= n) return;
 
     const int in_offset = in_offsets[instance];
     const int out_offset = out_offsets[instance];
     const int stride = strides[instance];
+    using namespace BigInt256;
 
     for(int i = 0; i < radix; i++){
-        DevFp a;
-        a.load(bn_env, in, in_offset + i * stride); 
-        a.store(bn_env, out, out_offset + i);
+        Fp a;
+        a.load((Int*)(in.mont_repr_data + in_offset + i * stride)); 
+        a.store((Int*)(out.mont_repr_data + out_offset + i));
     }
 }
 
@@ -1317,7 +1313,7 @@ void fft_copy(
   const int instances = 64;
   int threads = instances * TPI;
   int blocks = (n + instances - 1) / instances;
-  kernel_fft_copy<<<blocks, threads>>>(report, in, out, in_offsets, out_offsets, strides, n, radix);
+  kernel_fft_copy<<<blocks, threads>>>(in, out, in_offsets, out_offsets, strides, n, radix);
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
 

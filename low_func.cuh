@@ -151,78 +151,6 @@ __global__ void kernel_ect_add_new(
   store(R, lP, 0);
 }
 
-__global__ void kernel_mcl_bn128_g1_reduce_sum_pre(
-    cgbn_error_report_t* report, 
-    const Fp_model scalars,
-    const size_t *index_it,
-    uint32_t* counters, 
-    char* flags,
-    const int ranges_size, 
-    const uint32_t* firsts,
-    const uint32_t* seconds,
-    const Fp_model field_zero,
-    const Fp_model field_one,
-    char *density,
-    cgbn_mem_t<BITS>* bn_exponents,
-    cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv
-    ){
-  int local_instance = threadIdx.x / TPI;//0~63
-  int local_instances = 64;
-  int instance = blockIdx.x * local_instances + local_instance;
-
-  int range_offset = blockIdx.y * gridDim.x * local_instances;
-  int first = firsts[blockIdx.y];
-  int second = seconds[blockIdx.y];
-  int reduce_depth = second - first;//30130
-
-  context_t bn_context(cgbn_report_monitor, report, range_offset + instance);
-  env_t          bn_env(bn_context.env<env_t>());  
-
-  __shared__ uint32_t cache_res[64 * NUM * 3];
-  uint32_t *res = &cache_res[local_instance * NUM * 3];
-  __shared__ uint32_t cache_buffer[64 * NUM];
-  uint32_t *buffer = &cache_buffer[local_instance * NUM];
-  env_t::cgbn_t local_field_modulus;
-  cgbn_load(bn_env, local_field_modulus, field_modulus);
-
-  DevFp dev_field_zero, dev_field_one;
-  dev_field_zero.load(bn_env, field_zero, 0);
-  dev_field_one.load(bn_env, field_one, 0);
-  int count = 0;
-  for(int i = first + instance; i < first + reduce_depth; i+= gridDim.x * local_instances){
-    const int j = index_it[i];
-    DevFp scalar;
-    scalar.load(bn_env, scalars, j);
-    if(scalar.isequal(bn_env, dev_field_zero)){
-    }
-    else if(scalar.isequal(bn_env, dev_field_one)){
-      flags[j] = 1;
-    }
-    else{
-      const int group_thread = threadIdx.x & (TPI-1);
-      if(group_thread == 0){
-        density[i] = 1;
-      }
-      DevFp a = scalar.as_bigint(bn_env, res, buffer, local_field_modulus, field_inv);
-      a.store(bn_env, bn_exponents, i);
-      count += 1;
-    }
-  }
-  __shared__ int cache_counters[64];
-  const int group_thread = threadIdx.x & (TPI-1);
-  if(group_thread == 0)
-    cache_counters[local_instance] = count;
-  __syncthreads();
-  if(local_instance == 0){
-    for(int i = 1; i < local_instances; i++){
-      count += cache_counters[i];
-    }
-    if(group_thread == 0){
-      counters[blockIdx.y * gridDim.x + blockIdx.x] = count;
-    }
-  }
-}
-
 __global__ void kernel_reduce_sum_pre_new(
     const Fp_model scalars,
     char* flags,
@@ -452,13 +380,11 @@ int mcl_bn128_g1_reduce_sum(
     Fp_model one, Fp_model p, Fp_model a, const int specialA_, const int mode_, const uint64_t rp,
     const int max_reduce_depth, cudaStream_t stream
     ){
-  cgbn_error_report_t *report = get_error_report();
-
-  uint32_t threads = TPI*64;
+  uint32_t threads = 64;
   const int local_instances = 64 * BlockDepth;
   uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
   dim3 blocks(block_x, ranges_size, 1);
-  kernel_mcl_bn128_g1_reduce_sum_pre<<<blocks, threads, 0, stream>>>(report, scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
+  kernel_mcl_bn128_g1_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
 
   if(true){
       int n = max_reduce_depth;
@@ -581,7 +507,6 @@ __global__ void kernel_mcl_get_bid_and_counter(
 }
 
 __global__ void kernel_mcl_split_to_bucket(
-        cgbn_error_report_t* report, 
 		mcl_bn128_g1 data,
 		mcl_bn128_g1 buckets,
 		const int data_length,
@@ -589,18 +514,16 @@ __global__ void kernel_mcl_split_to_bucket(
 		const int* starts,
 		const int* value_ids,
 		const int* bucket_ids){
-	int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int instance = tid / TPI;
+	int instance = threadIdx.x + blockIdx.x * blockDim.x;
 	if(instance >= data_length) return;
-    context_t bn_context(cgbn_report_monitor, report, instance);
-    env_t          bn_env(bn_context.env<env_t>());  
 	int bucket_id = bucket_ids[instance];
+    using namespace BigInt256;
 	if(bucket_id > 0 && bucket_id < bucket_num){
 		int src_i = value_ids[instance];
 		int dst_i = instance;
-        DevEct a;
-        load(bn_env, a, data, src_i);
-        store(bn_env, buckets, a, dst_i);
+        Ect a;
+        load(a, data, src_i);
+        store(buckets, a, dst_i);
 	}
 }
 
@@ -623,10 +546,9 @@ void mcl_split_to_bucket(
   kernel_mcl_get_bid_and_counter<<<blocks, threads, 0, stream>>>(bn_exponents, c, k, data_length, bucket_num, indexs, bucket_ids, value_ids); 
   thrust::sort_by_key(thrust::cuda::par.on(stream), bucket_ids, bucket_ids + data_length, value_ids); 
 
-  cgbn_error_report_t *report = get_error_report();
   blocks = (data_length + 63) / 64;
-  threads = TPI * 64;
-  kernel_mcl_split_to_bucket<<<blocks, threads, 0, stream>>>(report, data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
+  threads = 64;
+  kernel_mcl_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
 }
 
 __global__ void kernel_mcl_calc_bucket_half_size(const int *starts, const int *ends, int* sizes, const int bucket_num){
@@ -717,29 +639,26 @@ __global__ void kernel_mcl_update_ends2(
 
 template<int Offset>
 __global__ void kernel_mcl_copy(
-    cgbn_error_report_t* report, 
     mcl_bn128_g1 data,
     int* starts, 
     int* ends, 
     mcl_bn128_g1 buckets,
     mcl_bn128_g1 zero,
     const int bucket_num){
-  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  const int instance = tid / TPI;
+  const int instance = threadIdx.x + blockIdx.x * blockDim.x;
   if(instance >= bucket_num) return;
-  context_t bn_context(cgbn_report_monitor, report, instance);
-  env_t          bn_env(bn_context.env<env_t>());  
   int bid = instance;
   int start = starts[bid];
   int end = ends[bid];
+  using namespace BigInt256;
   if(end - start == 0){
-      DevEct dev_zero;
-      load(bn_env, dev_zero, zero, 0);
-      store(bn_env, buckets, dev_zero, bid);
+      Ect dev_zero;
+      load(dev_zero, zero, 0);
+      store(buckets, dev_zero, bid);
   }else{
-      DevEct a;
-      load(bn_env, a, data, start);
-      store(bn_env, buckets, a, bid);
+      Ect a;
+      load(a, data, start);
+      store(buckets, a, bid);
   }
 }
 
@@ -758,7 +677,6 @@ void mcl_bucket_reduce_sum(
     const int mode_,
     const uint64_t rp,
     CudaStream stream){
-  cgbn_error_report_t *report = get_error_report();
   int *half_sizes, *bucket_ids;
   int* bucket_tids = d_instance_bucket_ids;
   half_sizes = ids;
@@ -780,8 +698,6 @@ void mcl_bucket_reduce_sum(
           sync(stream); 
           if(total_instances == 0) break;
           const int local_instances = 64;
-          threads = local_instances * TPI;
-          blocks = (total_instances + local_instances - 1) / local_instances;
           threads = local_instances;
           blocks = (total_instances + local_instances - 1) / local_instances;
           kernel_mcl_bucket_reduce_g1_new<local_instances><<<blocks, threads, 0, stream>>>(data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
@@ -794,34 +710,28 @@ void mcl_bucket_reduce_sum(
   }
 
   int local_instances = 64;
-  threads = local_instances * TPI;
+  threads = local_instances;
   blocks = (bucket_num + local_instances-1) / local_instances;
-  kernel_mcl_copy<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, t_zero, bucket_num);
+  kernel_mcl_copy<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(data, starts, ends, buckets, t_zero, bucket_num);
 }
 
 __global__ void kernel_mcl_reverse(
-      cgbn_error_report_t* report, 
       mcl_bn128_g1 data, mcl_bn128_g1 out, int n, int offset){
-  int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  int instance = tid / TPI;
-  int local_instances = blockDim.x / TPI;
-  context_t bn_context(cgbn_report_monitor, report, instance);
-  env_t          bn_env(bn_context.env<env_t>());  
-  for(int i = instance; i < n; i += gridDim.x * local_instances){
+  int instance = blockIdx.x * blockDim.x + threadIdx.x;
+  using namespace BigInt256;
+  for(int i = instance; i < n; i += gridDim.x * blockDim.x){
     int in_i = i * offset;
     int out_i = n - i - 1;
-    DevEct a;
-    load(bn_env, a, data, in_i);
-    store(bn_env, out, a, out_i);
+    Ect a;
+    load(a, data, in_i);
+    store(out, a, out_i);
   }
 }
 
 void mcl_reverse(mcl_bn128_g1 in, mcl_bn128_g1 out, const int n, const int offset, CudaStream stream){
-  const int threads = 64 * TPI;
-  cgbn_error_report_t *report = get_error_report();
+  const int threads = 64;
   int reverse_blocks = (n + 63) / 64;
-  kernel_mcl_reverse<<<reverse_blocks, threads, 0, stream>>>(report, in, out, n, offset);
-  //CUDA_CHECK(cudaDeviceSynchronize());
+  kernel_mcl_reverse<<<reverse_blocks, threads, 0, stream>>>(in, out, n, offset);
 }
 
 template<int BlockInstances, int ReduceDepthPerBlock>
@@ -984,7 +894,6 @@ void mcl_prefix_sum(
     const int mode_,
     const uint64_t rp,
     CudaStream stream){
-  cgbn_error_report_t *report = get_error_report();
   const int threads = 64;
   int instances = threads;//64
   int prefix_sum_blocks = (n + instances - 1) / instances;//2^10
@@ -1390,7 +1299,6 @@ int mcl_bn128_g2_reduce_sum_new(
     const Fp_model one, const Fp_model p, const Fp_model2 a, const int specialA_, const int mode_, const uint64_t rp,
     const int max_reduce_depth, const int values_size, cudaStream_t stream
     ){
-  cgbn_error_report_t *report = get_error_report();
 
   if(true){
       uint32_t threads = 64;//TPI * 64;
@@ -1442,7 +1350,6 @@ int mcl_bn128_g2_reduce_sum_new(
 }
 
 __global__ void kernel_mcl_split_to_bucket_g2(
-    cgbn_error_report_t* report, 
     mcl_bn128_g2 data,
     mcl_bn128_g2 buckets,
     const int data_length,
@@ -1450,18 +1357,16 @@ __global__ void kernel_mcl_split_to_bucket_g2(
     const int* starts,
     const int* value_ids,
     const int* bucket_ids){
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  int instance = tid / TPI;
+  int instance = threadIdx.x + blockIdx.x * blockDim.x;
   if(instance >= data_length) return;
-  context_t bn_context(cgbn_report_monitor, report, instance);
-  env_t          bn_env(bn_context.env<env_t>());  
   int bucket_id = bucket_ids[instance];
+  using namespace BigInt256;
   if(bucket_id > 0 && bucket_id < bucket_num){
       int src_i = value_ids[instance];
       int dst_i = instance;
-          DevEct2 a;
-          load(bn_env, a, data, src_i);
-          store(bn_env, buckets, a, dst_i);
+          Ect2 a;
+          load(a, data, src_i);
+          store(buckets, a, dst_i);
     }
 }
 
@@ -1484,10 +1389,9 @@ void mcl_split_to_bucket_g2(
   kernel_mcl_get_bid_and_counter<<<blocks, threads, 0, stream>>>(bn_exponents, c, k, data_length, bucket_num, indexs, bucket_ids, value_ids); 
   thrust::sort_by_key(thrust::cuda::par.on(stream), bucket_ids, bucket_ids + data_length, value_ids); 
 
-  cgbn_error_report_t *report = get_error_report();
   blocks = (data_length + 63) / 64;
-  threads = TPI * 64;
-  kernel_mcl_split_to_bucket_g2<<<blocks, threads, 0, stream>>>(report, data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
+  threads = 64;
+  kernel_mcl_split_to_bucket_g2<<<blocks, threads, 0, stream>>>(data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
 }
 
 
@@ -1535,29 +1439,26 @@ __global__ void kernel_mcl_bucket_reduce_g2_new(
 
 template<int Offset>
 __global__ void kernel_mcl_copy_g2(
-    cgbn_error_report_t* report, 
     mcl_bn128_g2 data,
     int* starts, 
     int* ends, 
     mcl_bn128_g2 buckets,
     mcl_bn128_g2 zero,
     const int bucket_num){
-  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  const int instance = tid / TPI;
+  const int instance = threadIdx.x + blockIdx.x * blockDim.x;
   if(instance >= bucket_num) return;
-  context_t bn_context(cgbn_report_monitor, report, instance);
-  env_t          bn_env(bn_context.env<env_t>());  
   int bid = instance;
   int start = starts[bid];
   int end = ends[bid];
+  using namespace BigInt256;
   if(end - start == 0){
-      DevEct2 dev_zero;
-      load(bn_env, dev_zero, zero, 0);
-      store(bn_env, buckets, dev_zero, bid * Offset);
+      Ect2 dev_zero;
+      load(dev_zero, zero, 0);
+      store(buckets, dev_zero, bid * Offset);
   }else{
-      DevEct2 a;
-      load(bn_env, a, data, start);
-      store(bn_env, buckets, a, bid * Offset);
+      Ect2 a;
+      load(a, data, start);
+      store(buckets, a, bid * Offset);
   }
 }
 
@@ -1576,7 +1477,6 @@ void mcl_bucket_reduce_sum_g2(
     const int mode_,
     const uint64_t rp,
     CudaStream stream){
-  cgbn_error_report_t *report = get_error_report();
   int *half_sizes, *bucket_ids;
   int* bucket_tids = d_instance_bucket_ids;
   half_sizes = ids;
@@ -1613,33 +1513,28 @@ void mcl_bucket_reduce_sum_g2(
   }else{
   }
   int local_instances = 64;
-  threads = local_instances * TPI;
+  threads = local_instances;
   blocks = (bucket_num + local_instances-1) / local_instances;
-  kernel_mcl_copy_g2<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(report, data, starts, ends, buckets, t_zero, bucket_num);
+  kernel_mcl_copy_g2<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(data, starts, ends, buckets, t_zero, bucket_num);
 }
 
 __global__ void kernel_mcl_reverse_g2(
-    cgbn_error_report_t* report, 
     mcl_bn128_g2 data, mcl_bn128_g2 out, int n, int offset){
-  int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  int instance = tid / TPI;
-  int local_instances = blockDim.x / TPI;
-  context_t bn_context(cgbn_report_monitor, report, instance);
-  env_t          bn_env(bn_context.env<env_t>());  
-  for(int i = instance; i < n; i += gridDim.x * local_instances){
+  int instance = blockIdx.x * blockDim.x + threadIdx.x;
+  using namespace BigInt256;
+  for(int i = instance; i < n; i += gridDim.x * blockDim.x){
       int in_i = i * offset;
       int out_i = n - i - 1;
-      DevEct2 a;
-      load(bn_env, a, data, in_i);
-      store(bn_env, out, a, out_i);
+      Ect2 a;
+      load(a, data, in_i);
+      store(out, a, out_i);
     }
 }
 
 void mcl_reverse_g2(mcl_bn128_g2 in, mcl_bn128_g2 out, const int n, const int offset, CudaStream stream){
-  const int threads = TPI * 64;
-  cgbn_error_report_t *report = get_error_report();
+  const int threads = 64;
   int reverse_blocks = (n + 63) / 64;
-  kernel_mcl_reverse_g2<<<reverse_blocks, threads, 0, stream>>>(report, in, out, n, offset);
+  kernel_mcl_reverse_g2<<<reverse_blocks, threads, 0, stream>>>(in, out, n, offset);
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
