@@ -1,11 +1,11 @@
 #include "cgbn_fp2.h"
-#include "cgbn_fp.cuh"
+//#include "cgbn_fp.cuh"
 
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <algorithm>
 
-#include "cgbn/cgbn.h"
+//#include "cgbn/cgbn.h"
 //#include "utility/cpu_support.h"
 //#include "utility/cpu_simple_bn_math.h"
 #include "gpu_support.h"

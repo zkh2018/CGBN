@@ -3,11 +3,6 @@ project(cgbn_math)
 find_package(CUDA)
 
 include_directories(./)
-include_directories(./include)
-#include_directories(./samples)
-include_directories(./cub-1.8.0)
-
-#include_directories(./mcl)
 
 set(CUDA_NVCC_FLAGS -gencode arch=compute_70,code=sm_70)
 

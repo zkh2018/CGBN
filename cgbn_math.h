@@ -4,11 +4,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <gmp.h>
-#include "cgbn/cgbn_mem.h"
+#include "cgbn_mem.h"
 
 #include <cuda_runtime.h>
-#include "cgbn/cgbn.h"
 #include "gpu_support.h"
 
 const int BITS = 256;
@@ -17,10 +15,10 @@ const int NUM = BITS/BITS_PER_NUM;
 #define BlockDepth 64
 
 namespace gpu{
-#define TPI 4
-typedef cgbn_context_t<TPI> context_t;
-typedef cgbn_env_t<context_t, BITS> env_t;
-#define max_threads_per_block  (256/TPI)
+//#define TPI 4
+//typedef cgbn_context_t<TPI> context_t;
+//typedef cgbn_env_t<context_t, BITS> env_t;
+//#define max_threads_per_block  (256/TPI)
 
 typedef cudaStream_t CudaStream;
 void create_stream(CudaStream* stream);
@@ -67,25 +65,6 @@ struct gpu_buffer{
   void copy_from_host(const uint32_t* data, const uint32_t n, CudaStream stream = 0);
   void copy_to_host(uint32_t* data, const uint32_t n, CudaStream stream = 0);
 };
-
-int add_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry, const uint32_t count);
-int add_1(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, uint32_t b, uint32_t* carry, const uint32_t count);
-
-int sub_two_num(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, uint32_t* carry, const uint32_t count);
-int sub_1(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, uint32_t b, uint32_t* carry, const uint32_t count);
-
-int add(
-    cgbn_mem_t<BITS>* x1, cgbn_mem_t<BITS>* y1, cgbn_mem_t<BITS>* z1, 
-    cgbn_mem_t<BITS>* x2, cgbn_mem_t<BITS>* y2, cgbn_mem_t<BITS>* z2, 
-    cgbn_mem_t<BITS>* x_out, cgbn_mem_t<BITS>* y_out, cgbn_mem_t<BITS>* z_out);
-
-
-int mul_two_num(
-    cgbn_mem_t<BITS>* c_low, 
-    cgbn_mem_t<BITS>* c_high, 
-    cgbn_mem_t<BITS>* const a, cgbn_mem_t<BITS>* const b, const uint32_t count);
-
-int mul_1(cgbn_mem_t<BITS>* c, cgbn_mem_t<BITS>* const a, uint32_t b, uint32_t* carry, const uint32_t count);
 
 
 }//gpu

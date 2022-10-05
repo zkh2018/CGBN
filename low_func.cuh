@@ -1,10 +1,6 @@
 #ifndef LOW_FUNC_CUH
 #define LOW_FUNC_CUH
 
-#include "cgbn_fp.h"
-#include "cgbn_fp2.h"
-#include "cgbn_alt_bn128_g2.cuh"
-#include "cgbn_multi_exp.h"
 #include "cgbn_ect.h"
 #include <stdint.h>
 #include <thrust/scan.h>
@@ -12,103 +8,11 @@
 
 namespace gpu{
 
+const int BUCKET_INSTANCES = 64;
+
 const int N_32 = BITS/32;//8;
 const int N_64 = BITS/64;//4
 
-inline __device__ bool dev_is_zero(const env_t& bn_env, uint32_t* const x){
-    env_t::cgbn_t a;
-    cgbn_load(bn_env, a, x);
-    return cgbn_equals_ui32(bn_env, a, 0);
-}
-
-inline __device__ bool dev_is_zero(const env_t& bn_env, const env_t::cgbn_t& a){
-    return cgbn_equals_ui32(bn_env, a, 0);
-}
-
-inline __device__ bool dev_is_one(const env_t& bn_env, uint32_t* const x, uint32_t* const one){
-    env_t::cgbn_t lx, lone;
-    cgbn_load(bn_env, lx, x);
-    cgbn_load(bn_env, lone, one);
-    return cgbn_equals(bn_env, lx, lone);
-}
-
-inline __device__ bool dev_is_one(const env_t& bn_env, const env_t::cgbn_t& lx, const env_t::cgbn_t& lone){
-    return cgbn_equals(bn_env, lx, lone);
-}
-
-inline __device__ bool dev_equal(const env_t& bn_env, uint32_t* const x, uint32_t *const y){
-    env_t::cgbn_t a, b;
-    cgbn_load(bn_env, a, x);
-    cgbn_load(bn_env, b, y);
-    return cgbn_equals(bn_env, a, b);
-}
-
-inline __device__ bool dev_equal(const env_t& bn_env, const env_t::cgbn_t& a, const env_t::cgbn_t& b){
-    return cgbn_equals(bn_env, a, b);
-}
-
-inline __device__ void dev_clear(const env_t& bn_env, uint32_t *x){
-    env_t::cgbn_t zero;
-    cgbn_set_ui32(bn_env, zero, 0);
-    cgbn_store(bn_env, x, zero);
-}
-
-inline __device__ void dev_clear(const env_t& bn_env, env_t::cgbn_t& x){
-    cgbn_set_ui32(bn_env, x, 0);
-}
-
-__device__ void print64(const env_t& bn_env, const env_t::cgbn_t& a){
-    __shared__ uint32_t cache[N_32];    
-    cgbn_store(bn_env, cache, a);
-    int group_id = threadIdx.x & (TPI-1);
-    if(group_id == 0){
-        for(int i = 0; i < 4; i++){
-            printf("%lu ", ((uint64_t*)cache)[i]);
-        }
-        printf("\n");
-    }
-}
-
-
-struct MclFp: public DevFp {
-    uint32_t *ptr;
-};
-
-struct DevEct : public DevAltBn128G1 {
-
-inline __device__ bool is_zero(const env_t& bn_env) const {
-    return dev_is_zero(bn_env, this->z.mont);
-}
-    
-inline __device__ void set(const env_t& bn_env, const DevEct& other){
-    this->x.set(bn_env, other.x);
-    this->y.set(bn_env, other.y);
-    this->z.set(bn_env, other.z);
-}
-
-inline __device__ void clear(const env_t& bn_env){
-    dev_clear(bn_env, x.mont);
-    dev_clear(bn_env, y.mont);
-    dev_clear(bn_env, z.mont);
-}
-
-};
-
-inline __device__ void load(const env_t& bn_env, DevEct& Q, const mcl_bn128_g1& P, const int offset){
-    cgbn_load(bn_env, Q.x.mont, P.x.mont_repr_data + offset);
-    cgbn_load(bn_env, Q.y.mont, P.y.mont_repr_data + offset);
-    cgbn_load(bn_env, Q.z.mont, P.z.mont_repr_data + offset);
-}
-
-inline __device__ void store(const env_t& bn_env, mcl_bn128_g1& Q, const DevEct& P, const int offset){
-    cgbn_store(bn_env, Q.x.mont_repr_data + offset, P.x.mont);
-    cgbn_store(bn_env, Q.y.mont_repr_data + offset, P.y.mont);
-    cgbn_store(bn_env, Q.z.mont_repr_data + offset, P.z.mont);
-}
-
-inline __device__ void load(const env_t& bn_env, MclFp& Q, const Fp_model& data, const int offset){
-    cgbn_load(bn_env, Q.mont, data.mont_repr_data + offset);
-}
 
 inline __device__ void load(BigInt256::Int* dst, const Fp_model& src, const int offset){
     memcpy(dst, src.mont_repr_data + offset, sizeof(BigInt256::Int256));
@@ -226,7 +130,6 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_pre_new(
   }
 }
 
-template<int BlockInstances>
 __global__ void kernel_mcl_bn128_g1_reduce_sum_one_range5_new(
     mcl_bn128_g1 values, 
     const Fp_model scalars,
@@ -277,7 +180,6 @@ __global__ void kernel_mcl_bn128_g1_reduce_sum_one_range5_new(
   store(partial, result, first + instance);
 }
 
-template<int BlockInstances>
 __global__ void kernel_mcl_bn128_g1_reduce_sum_one_range7_new(
     mcl_bn128_g1 values, 
     const Fp_model scalars,
@@ -392,7 +294,7 @@ int mcl_bn128_g1_reduce_sum(
       threads = local_instances2;
       uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
       dim3 blocks2(block_x2, ranges_size, 1);
-      kernel_mcl_bn128_g1_reduce_sum_one_range5_new<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+      kernel_mcl_bn128_g1_reduce_sum_one_range5_new<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
       const int update_threads = 64;
       const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
       kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
@@ -401,7 +303,7 @@ int mcl_bn128_g1_reduce_sum(
       while(n>=2){
           uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
           dim3 blocks2(block_x2, ranges_size, 1);
-          kernel_mcl_bn128_g1_reduce_sum_one_range7_new<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+          kernel_mcl_bn128_g1_reduce_sum_one_range7_new<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
           //CUDA_CHECK(cudaDeviceSynchronize());
           kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
           //CUDA_CHECK(cudaDeviceSynchronize());
@@ -409,7 +311,7 @@ int mcl_bn128_g1_reduce_sum(
       }
   }
 
-  kernel_mcl_bn128_g1_reduce_sum_one_range6_new<<<1, TPI, 0, stream>>>(partial, ranges_size, firsts, one, p, a, specialA_, mode_, rp);
+  kernel_mcl_bn128_g1_reduce_sum_one_range6_new<<<1, 1, 0, stream>>>(partial, ranges_size, firsts, one, p, a, specialA_, mode_, rp);
   //CUDA_CHECK(cudaDeviceSynchronize());
   return 0;
 }
@@ -574,7 +476,6 @@ __global__ void kernel_mcl_get_bucket_tids(const int* half_sizes, const int buck
     }
 }
 
-template<int BlockInstances>
 __global__ void kernel_mcl_bucket_reduce_g1_new(
     mcl_bn128_g1 data,
     const int *starts, 
@@ -637,7 +538,6 @@ __global__ void kernel_mcl_update_ends2(
   }
 }
 
-template<int Offset>
 __global__ void kernel_mcl_copy(
     mcl_bn128_g1 data,
     int* starts, 
@@ -700,7 +600,7 @@ void mcl_bucket_reduce_sum(
           const int local_instances = 64;
           threads = local_instances;
           blocks = (total_instances + local_instances - 1) / local_instances;
-          kernel_mcl_bucket_reduce_g1_new<local_instances><<<blocks, threads, 0, stream>>>(data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+          kernel_mcl_bucket_reduce_g1_new<<<blocks, threads, 0, stream>>>(data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
           //CUDA_CHECK(cudaDeviceSynchronize());
           threads = 256;
           blocks = (bucket_num + threads-1) / threads;
@@ -712,7 +612,7 @@ void mcl_bucket_reduce_sum(
   int local_instances = 64;
   threads = local_instances;
   blocks = (bucket_num + local_instances-1) / local_instances;
-  kernel_mcl_copy<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(data, starts, ends, buckets, t_zero, bucket_num);
+  kernel_mcl_copy<<<blocks, threads, 0, stream>>>(data, starts, ends, buckets, t_zero, bucket_num);
 }
 
 __global__ void kernel_mcl_reverse(
@@ -734,7 +634,7 @@ void mcl_reverse(mcl_bn128_g1 in, mcl_bn128_g1 out, const int n, const int offse
   kernel_mcl_reverse<<<reverse_blocks, threads, 0, stream>>>(in, out, n, offset);
 }
 
-template<int BlockInstances, int ReduceDepthPerBlock>
+template<int ReduceDepthPerBlock>
 __global__ void kernel_mcl_prefix_sum_pre_new(
       mcl_bn128_g1 data, 
       const int n,
@@ -764,7 +664,7 @@ __global__ void kernel_mcl_prefix_sum_pre_new(
   }
 }
 
-template<int BlockInstances, int ReduceDepthPerBlock>
+template<int ReduceDepthPerBlock>
 __global__ void kernel_mcl_prefix_sum_post_new(
       mcl_bn128_g1 data, 
       mcl_bn128_g1 block_sums, 
@@ -902,25 +802,25 @@ void mcl_prefix_sum(
   for(int stride = 1; stride <= 32; stride *= 2){
     int instances = 32 / stride;
     int threads = instances;
-    kernel_mcl_prefix_sum_pre_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, n, stride, one, p, a, specialA_, mode_, rp);
+    kernel_mcl_prefix_sum_pre_new<64><<<prefix_sum_blocks, threads, 0, stream>>>(data, n, stride, one, p, a, specialA_, mode_, rp);
   }
   for(int stride = 32; stride > 0; stride /= 2){
     int instances = 32 / stride;
     int threads = instances;
     bool save_block_sum = (stride == 1);
-    kernel_mcl_prefix_sum_post_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+    kernel_mcl_prefix_sum_post_new<64><<<prefix_sum_blocks, threads, 0, stream>>>(data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
   }
 
   for(int stride = 1; stride <= 32; stride *= 2){
     int instances = 32 / stride;
     int threads = instances;
-    kernel_mcl_prefix_sum_pre_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
+    kernel_mcl_prefix_sum_pre_new<64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
   }
   for(int stride = 32; stride > 0; stride /= 2){
     int instances = 32 / stride;
     int threads = instances;
     bool save_block_sum = (stride == 1);
-    kernel_mcl_prefix_sum_post_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+    kernel_mcl_prefix_sum_post_new<64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
   }
   
   kernel_mcl_prefix_sum_new<16, 8, false><<<1, 8, 0, stream>>>(block_sums2, block_sums2, prefix_sum_blocks2, one, p, a, specialA_, mode_, rp);
@@ -930,7 +830,6 @@ void mcl_prefix_sum(
 }
 
 
-template<int BlockInstances>
 __global__ void kernel_mcl_reduce_sum_new(
     mcl_bn128_g1 data, 
     mcl_bn128_g1 out, 
@@ -976,81 +875,16 @@ void mcl_bn128_g1_reduce_sum2(
   int threads = instances;
   int half_len = (len + 1) / 2;
   int blocks = (half_len + instances - 1) / instances;
-  kernel_mcl_reduce_sum_new<instances><<<blocks, threads, 0, stream>>>(data, out, half_len, len, one, p, a, specialA_, mode_, rp);
+  kernel_mcl_reduce_sum_new<<<blocks, threads, 0, stream>>>(data, out, half_len, len, one, p, a, specialA_, mode_, rp);
   len = half_len;
   while(len > 1){
       int half_len = (len + 1) / 2;
       int blocks = (half_len + instances - 1) / instances;
-      kernel_mcl_reduce_sum_new<instances><<<blocks, threads, 0, stream>>>(out, out, half_len, len, one, p, a, specialA_, mode_, rp);
+      kernel_mcl_reduce_sum_new<<<blocks, threads, 0, stream>>>(out, out, half_len, len, one, p, a, specialA_, mode_, rp);
       len = half_len;
   }
 }
 
-//mcl_bn128_g2
-struct MclFp2: public DevFp2 {
-    uint32_t *ptr;
-    inline __device__ bool is_zero(const env_t& bn_env) const {
-        return (dev_is_zero(bn_env, this->c0.mont) && dev_is_zero(bn_env, this->c1.mont));
-    }
-
-    inline __device__ bool is_one(const env_t& bn_env, const env_t::cgbn_t& one) const {
-        return (dev_is_one(bn_env, this->c0.mont, one) && dev_is_zero(bn_env, this->c1.mont));
-    }
-
-};
-
-
-
-struct Fp2Dbl{
-    env_t::cgbn_wide_t a,b;
-};
-
-struct DevEct2 {
-    MclFp2 x, y, z;
-
-    inline __device__ bool is_zero(const env_t& bn_env) const {
-        return z.is_zero(bn_env);
-    }
-    
-    inline __device__ void set(const env_t& bn_env, const DevEct2& other){
-        this->x.copy_from(bn_env, other.x);
-        this->y.copy_from(bn_env, other.y);
-        this->z.copy_from(bn_env, other.z);
-    }
-
-    inline __device__ void clear(const env_t& bn_env){
-        x.set_zero(bn_env);
-        y.set_zero(bn_env);
-        z.set_zero(bn_env);
-    }
-};
-
-inline __device__ void load(const env_t& bn_env, MclFp2& dst, const Fp_model2& src, const int offset){
-    cgbn_load(bn_env, dst.c0.mont, src.c0.mont_repr_data + offset);
-    cgbn_load(bn_env, dst.c1.mont, src.c1.mont_repr_data + offset);
-}
-
-inline __device__ void load(const env_t& bn_env, DevEct2& dst, const mcl_bn128_g2& src, const int offset){
-    cgbn_load(bn_env, dst.x.c0.mont, src.x.c0.mont_repr_data + offset);
-    cgbn_load(bn_env, dst.x.c1.mont, src.x.c1.mont_repr_data + offset);
-
-    cgbn_load(bn_env, dst.y.c0.mont, src.y.c0.mont_repr_data + offset);
-    cgbn_load(bn_env, dst.y.c1.mont, src.y.c1.mont_repr_data + offset);
-
-    cgbn_load(bn_env, dst.z.c0.mont, src.z.c0.mont_repr_data + offset);
-    cgbn_load(bn_env, dst.z.c1.mont, src.z.c1.mont_repr_data + offset);
-}
-
-inline __device__ void store(const env_t& bn_env, mcl_bn128_g2& dst, const DevEct2& src, const int offset){
-    cgbn_store(bn_env, dst.x.c0.mont_repr_data + offset, src.x.c0.mont);
-    cgbn_store(bn_env, dst.x.c1.mont_repr_data + offset, src.x.c1.mont);
-
-    cgbn_store(bn_env, dst.y.c0.mont_repr_data + offset, src.y.c0.mont);
-    cgbn_store(bn_env, dst.y.c1.mont_repr_data + offset, src.y.c1.mont);
-
-    cgbn_store(bn_env, dst.z.c0.mont_repr_data + offset, src.z.c0.mont);
-    cgbn_store(bn_env, dst.z.c1.mont_repr_data + offset, src.z.c1.mont);
-}
 
 inline __device__ void load(BigInt256::Ect2& dst, const mcl_bn128_g2& src, const int offset){
     memcpy(dst.x.c0, src.x.c0.mont_repr_data + offset, sizeof(BigInt256::Int256));
@@ -1070,7 +904,6 @@ inline __device__ void store(mcl_bn128_g2& dst, const BigInt256::Ect2& src, cons
     memcpy(dst.z.c1.mont_repr_data + offset, src.z.c1, sizeof(BigInt256::Int256));
 }
 
-template<int BlockInstances>
 __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range5(
     mcl_bn128_g2 values, 
     const Fp_model scalars,
@@ -1120,7 +953,6 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range5(
   store(partial, result, first+instance);
 }
 
-template<int BlockInstances>
 __global__ void kernel_mcl_bn128_g2_reduce_sum_one_range7(
     mcl_bn128_g2 values, 
     Fp_model scalars,
@@ -1202,8 +1034,6 @@ inline __device__ void printInt256(const BigInt256::Int256 x){
     }
     printf("\n");
 }
-
-template<int BlockSize>
 __global__ void kernel_mcl_bn128_g2_reduce_sum_new(
     const int range_id,
     const int range_offset,
@@ -1250,7 +1080,6 @@ __global__ void kernel_mcl_bn128_g2_reduce_sum_new(
   store(partial, result, offset + tid);
 }
 
-template<int BlockSize>
 __global__ void kernel_mcl_bn128_g2_reduce_sum_after_new(
     mcl_bn128_g2 partial, 
     const int half_n, 
@@ -1321,7 +1150,7 @@ int mcl_bn128_g2_reduce_sum_new(
       int threads = local_instances2;
       uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
       dim3 blocks2(block_x2, ranges_size, 1);
-      kernel_mcl_bn128_g2_reduce_sum_one_range5<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+      kernel_mcl_bn128_g2_reduce_sum_one_range5<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
       const int update_threads = 64;
       const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
       kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
@@ -1330,19 +1159,19 @@ int mcl_bn128_g2_reduce_sum_new(
       while(n>=2){
           uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
           dim3 blocks2(block_x2, ranges_size, 1);
-          kernel_mcl_bn128_g2_reduce_sum_one_range7<local_instances2><<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+          kernel_mcl_bn128_g2_reduce_sum_one_range7<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
           kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
           n = (n+1)/2;
       }
       kernel_mcl_bn128_g2_reduce_sum_one_range6<<<1, 1, 0, stream>>>(partial, ranges_size, firsts, one, p, a, specialA_, mode_, rp);
   }else{
-      kernel_mcl_bn128_g2_reduce_sum_new<threads_per_block><<<dim3(blocks_per_range, ranges_size, 1), threads_per_block, 0, stream>>>(0, 0, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, one, p, a, specialA_, mode_, t_zero, rp);
+      kernel_mcl_bn128_g2_reduce_sum_new<<<dim3(blocks_per_range, ranges_size, 1), threads_per_block, 0, stream>>>(0, 0, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, one, p, a, specialA_, mode_, t_zero, rp);
 
       int n = blocks_per_range * INSTANCES_PER_BLOCK * ranges_size;
       while(n>=2){
           int half_n = n / 2;
           int blocks = (half_n + INSTANCES_PER_BLOCK-1) / INSTANCES_PER_BLOCK;
-          kernel_mcl_bn128_g2_reduce_sum_after_new<threads_per_block><<<blocks, threads_per_block, 0, stream>>>(partial, half_n, n, one, p, a, specialA_, mode_, rp);
+          kernel_mcl_bn128_g2_reduce_sum_after_new<<<blocks, threads_per_block, 0, stream>>>(partial, half_n, n, one, p, a, specialA_, mode_, rp);
           n /= 2;
       }
   }
@@ -1395,7 +1224,6 @@ void mcl_split_to_bucket_g2(
 }
 
 
-template<int BlockInstances>
 __global__ void kernel_mcl_bucket_reduce_g2_new(
     mcl_bn128_g2 data,
     const int *starts, 
@@ -1502,7 +1330,7 @@ void mcl_bucket_reduce_sum_g2(
           }else{
               threads = local_instances;
               blocks = (total_instances + local_instances - 1) / local_instances;
-              kernel_mcl_bucket_reduce_g2_new<local_instances><<<blocks, threads, 0, stream>>>(data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
+              kernel_mcl_bucket_reduce_g2_new<<<blocks, threads, 0, stream>>>(data, starts, ends, bucket_ids, bucket_tids, total_instances, t_zero, one, p, a, specialA_, mode_, rp); 
           }
           //CUDA_CHECK(cudaDeviceSynchronize());
           threads = 256;
@@ -1538,7 +1366,7 @@ void mcl_reverse_g2(mcl_bn128_g2 in, mcl_bn128_g2 out, const int n, const int of
   //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-template<int BlockInstances, int ReduceDepthPerBlock>
+template<int ReduceDepthPerBlock>
 __global__ void kernel_mcl_prefix_sum_pre_g2_new(
     mcl_bn128_g2 data, 
     const int n,
@@ -1572,7 +1400,7 @@ __global__ void kernel_mcl_prefix_sum_pre_g2_new(
     }
 }
 
-template<int BlockInstances, int ReduceDepthPerBlock>
+template<int ReduceDepthPerBlock>
 __global__ void kernel_mcl_prefix_sum_post_g2_new(
     mcl_bn128_g2 data, 
     mcl_bn128_g2 block_sums, 
@@ -1724,20 +1552,20 @@ void mcl_prefix_sum_g2(
       for(int stride = 1; stride <= 32; stride *= 2){
           int instances = 32 / stride;
           int threads = instances;
-          kernel_mcl_prefix_sum_pre_g2_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, n, stride, one, p, a, specialA_, mode_, rp);
+          kernel_mcl_prefix_sum_pre_g2_new<64><<<prefix_sum_blocks, threads, 0, stream>>>(data, n, stride, one, p, a, specialA_, mode_, rp);
       }
 
       for(int stride = 32; stride > 0; stride /= 2){
           int instances = 32 / stride;
           int threads = instances;
           bool save_block_sum = (stride == 1);
-          kernel_mcl_prefix_sum_post_g2_new<32, 64><<<prefix_sum_blocks, threads, 0, stream>>>(data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+          kernel_mcl_prefix_sum_post_g2_new<64><<<prefix_sum_blocks, threads, 0, stream>>>(data, block_sums, n, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
       }
 
       for(int stride = 1; stride <= 32; stride *= 2){
           int instances = 32 / stride;
           int threads = instances;
-          kernel_mcl_prefix_sum_pre_g2_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
+          kernel_mcl_prefix_sum_pre_g2_new<64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, prefix_sum_blocks, stride, one, p, a, specialA_, mode_, rp);
       }
 
 
@@ -1745,7 +1573,7 @@ void mcl_prefix_sum_g2(
           int instances = 32 / stride;
           int threads = instances;
           bool save_block_sum = (stride == 1);
-          kernel_mcl_prefix_sum_post_g2_new<32, 64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
+          kernel_mcl_prefix_sum_post_g2_new<64><<<prefix_sum_blocks2, threads, 0, stream>>>(block_sums, block_sums2, prefix_sum_blocks, stride, save_block_sum, one, p, a, specialA_, mode_, rp);
       }
 
       kernel_mcl_prefix_sum_g2_new<16, 8, false><<<1, 16/2, 0, stream>>>(block_sums2, block_sums2, prefix_sum_blocks2, one, p, a, specialA_, mode_, rp);
@@ -1756,7 +1584,6 @@ void mcl_prefix_sum_g2(
   }
 }
 
-template<int BlockInstances>
 __global__ void kernel_mcl_reduce_sum_g2_new(
     mcl_bn128_g2 data, 
     mcl_bn128_g2 out, 
@@ -1806,12 +1633,12 @@ void mcl_bn128_g2_reduce_sum2(
   int threads = instances ;
   int half_len = (len + 1) / 2;
   int blocks = (half_len + instances - 1) / instances;
-  kernel_mcl_reduce_sum_g2_new<instances><<<blocks, threads, 0, stream>>>(data, out, half_len, len, one, p, a, specialA_, mode_, rp);
+  kernel_mcl_reduce_sum_g2_new<<<blocks, threads, 0, stream>>>(data, out, half_len, len, one, p, a, specialA_, mode_, rp);
   len = half_len;
   while(len > 1){
       int half_len = (len + 1) / 2;
       int blocks = (half_len + instances - 1) / instances;
-      kernel_mcl_reduce_sum_g2_new<instances><<<blocks, threads, 0, stream>>>(out, out, half_len, len, one, p, a, specialA_, mode_, rp);
+      kernel_mcl_reduce_sum_g2_new<<<blocks, threads, 0, stream>>>(out, out, half_len, len, one, p, a, specialA_, mode_, rp);
       len = half_len;
   }
 }
