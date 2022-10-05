@@ -4,14 +4,10 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <stdio.h>
+#include "cgbn_math.h"
 
 namespace BigInt256 {
-
-const int BITS = 256;
-const int BASE_BITS = 64;
-const int N = BITS / BASE_BITS;
-typedef uint64_t Int;
-typedef uint64_t Int256[N];
+using namespace gpu;
 
 inline __device__ void printInt256(const Int* x, const char* desc){
     printf("%s:\n", desc);

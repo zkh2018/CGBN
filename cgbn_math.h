@@ -9,16 +9,17 @@
 #include <cuda_runtime.h>
 #include "gpu_support.h"
 
-const int BITS = 256;
-const int BITS_PER_NUM = 32;
-const int NUM = BITS/BITS_PER_NUM; 
 #define BlockDepth 64
-
+const int BITS = 256;
 namespace gpu{
-//#define TPI 4
-//typedef cgbn_context_t<TPI> context_t;
-//typedef cgbn_env_t<context_t, BITS> env_t;
-//#define max_threads_per_block  (256/TPI)
+
+const int BASE_BITS = 64;
+const int N = BITS / BASE_BITS;
+typedef uint64_t Int;
+typedef uint64_t Int256[N];
+  const int BUCKET_INSTANCES = 64;
+  const int BUCKET_INSTANCES_G2 = 64;
+
 
 typedef cudaStream_t CudaStream;
 void create_stream(CudaStream* stream);
