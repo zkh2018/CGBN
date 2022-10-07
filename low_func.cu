@@ -9,30 +9,6 @@
 
 namespace gpu{
 
-__global__ void kernel_ect_add_new(
-    mcl_bn128_g1 R, 
-    mcl_bn128_g1 P,
-    mcl_bn128_g1 Q,
-    Fp_model one, 
-    Fp_model p, 
-    Fp_model a, 
-    const int specialA_,
-    const int mode_,
-    const uint64_t rp){
-    using namespace BigInt256;
-  Ect lP, lQ;
-  Int256 lone, lp, la;
-  load(lP, P, 0);
-  load(lQ, Q, 0);
-
-  load(lone, one, 0); 
-  load(la, a, 0); 
-  load(lp, p, 0); 
-
-  add(lP, lP, lQ, lone, lp, specialA_, la, mode_, rp);  
-  store(R, lP, 0);
-}
-
 __global__ void kernel_reduce_sum_pre_new(
     const Fp_model scalars,
     char* flags,
@@ -394,16 +370,31 @@ __global__ void kernel_mcl_split_to_bucket(
 		const int* starts,
 		const int* value_ids,
 		const int* bucket_ids){
-	int instance = threadIdx.x + blockIdx.x * blockDim.x;
+    using namespace BigInt256;
+	const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    const int instance = tid / N;
+    const int local_id = tid & (N-1);
+
 	if(instance >= data_length) return;
 	int bucket_id = bucket_ids[instance];
-    using namespace BigInt256;
 	if(bucket_id > 0 && bucket_id < bucket_num){
 		int src_i = value_ids[instance];
 		int dst_i = instance;
+        Int* in_x = ((Int*)(data.x.mont_repr_data + src_i)->_limbs);
+        Int* in_y = ((Int*)(data.y.mont_repr_data + src_i)->_limbs);
+        Int* in_z = ((Int*)(data.z.mont_repr_data + src_i)->_limbs);
+        Int* out_x = ((Int*)(buckets.x.mont_repr_data + dst_i)->_limbs);
+        Int* out_y = ((Int*)(buckets.y.mont_repr_data + dst_i)->_limbs);
+        Int* out_z = ((Int*)(buckets.z.mont_repr_data + dst_i)->_limbs);
         Ect a;
-        load(a, data, src_i);
-        store(buckets, a, dst_i);
+        a.x[local_id] = in_x[local_id];
+        a.y[local_id] = in_y[local_id];
+        a.z[local_id] = in_z[local_id];
+        out_x[local_id] = a.x[local_id];
+        out_y[local_id] = a.y[local_id];
+        out_z[local_id] = a.z[local_id];
+        //load(a, data, src_i);
+        //store(buckets, a, dst_i);
 	}
 }
 
@@ -427,7 +418,7 @@ void mcl_split_to_bucket(
   thrust::sort_by_key(thrust::cuda::par.on(stream), bucket_ids, bucket_ids + data_length, value_ids); 
 
   blocks = (data_length + 63) / 64;
-  threads = 64;
+  threads = 64 * N;
   kernel_mcl_split_to_bucket<<<blocks, threads, 0, stream>>>(data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
 }
 
@@ -523,20 +514,39 @@ __global__ void kernel_mcl_copy(
     mcl_bn128_g1 buckets,
     mcl_bn128_g1 zero,
     const int bucket_num){
-  const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+  using namespace BigInt256;
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / N;
+  const int local_id = tid & (N-1);
   if(instance >= bucket_num) return;
   int bid = instance;
   int start = starts[bid];
   int end = ends[bid];
-  using namespace BigInt256;
+  Int* out_x = ((Int*)(buckets.x.mont_repr_data + bid)->_limbs);
+  Int* out_y = ((Int*)(buckets.y.mont_repr_data + bid)->_limbs);
+  Int* out_z = ((Int*)(buckets.z.mont_repr_data + bid)->_limbs);
   if(end - start == 0){
+      Int* in_x = ((Int*)(zero.x.mont_repr_data)->_limbs);
+      Int* in_y = ((Int*)(zero.y.mont_repr_data)->_limbs);
+      Int* in_z = ((Int*)(zero.z.mont_repr_data)->_limbs);
       Ect dev_zero;
-      load(dev_zero, zero, 0);
-      store(buckets, dev_zero, bid);
+      dev_zero.x[local_id] = in_x[local_id];
+      dev_zero.y[local_id] = in_y[local_id];
+      dev_zero.z[local_id] = in_z[local_id];
+      out_x[local_id] = dev_zero.x[local_id];
+      out_y[local_id] = dev_zero.y[local_id];
+      out_z[local_id] = dev_zero.z[local_id];
   }else{
       Ect a;
-      load(a, data, start);
-      store(buckets, a, bid);
+      Int* in_x = ((Int*)(data.x.mont_repr_data + start)->_limbs);
+      Int* in_y = ((Int*)(data.y.mont_repr_data + start)->_limbs);
+      Int* in_z = ((Int*)(data.z.mont_repr_data + start)->_limbs);
+      a.x[local_id] = in_x[local_id];
+      a.y[local_id] = in_y[local_id];
+      a.z[local_id] = in_z[local_id];
+      out_x[local_id] = a.x[local_id];
+      out_y[local_id] = a.y[local_id];
+      out_z[local_id] = a.z[local_id];
   }
 }
 
@@ -588,26 +598,36 @@ void mcl_bucket_reduce_sum(
   }
 
   int local_instances = 64;
-  threads = local_instances;
+  threads = local_instances * N;
   blocks = (bucket_num + local_instances-1) / local_instances;
   kernel_mcl_copy<<<blocks, threads, 0, stream>>>(data, starts, ends, buckets, t_zero, bucket_num);
 }
 
 __global__ void kernel_mcl_reverse(
       mcl_bn128_g1 data, mcl_bn128_g1 out, int n, int offset){
-  int instance = blockIdx.x * blockDim.x + threadIdx.x;
-  using namespace BigInt256;
-  for(int i = instance; i < n; i += gridDim.x * blockDim.x){
-    int in_i = i * offset;
-    int out_i = n - i - 1;
-    Ect a;
-    load(a, data, in_i);
-    store(out, a, out_i);
-  }
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int instance = tid / N;
+  const int local_id = tid & (N-1);
+  int in_i = instance * offset;
+  int out_i = n - instance - 1;
+  Ect a;
+  Int* out_x = ((Int*)(out.x.mont_repr_data + out_i)->_limbs);
+  Int* out_y = ((Int*)(out.y.mont_repr_data + out_i)->_limbs);
+  Int* out_z = ((Int*)(out.z.mont_repr_data + out_i)->_limbs);
+
+  Int* in_x = ((Int*)(data.x.mont_repr_data + in_i)->_limbs);
+  Int* in_y = ((Int*)(data.y.mont_repr_data + in_i)->_limbs);
+  Int* in_z = ((Int*)(data.z.mont_repr_data + in_i)->_limbs);
+  a.x[local_id] = in_x[local_id];
+  a.y[local_id] = in_y[local_id];
+  a.z[local_id] = in_z[local_id];
+  out_x[local_id] = a.x[local_id];
+  out_y[local_id] = a.y[local_id];
+  out_z[local_id] = a.z[local_id];
 }
 
 void mcl_reverse(mcl_bn128_g1 in, mcl_bn128_g1 out, const int n, const int offset, CudaStream stream){
-  const int threads = 64;
+  const int threads = 64 * N;
   int reverse_blocks = (n + 63) / 64;
   kernel_mcl_reverse<<<reverse_blocks, threads, 0, stream>>>(in, out, n, offset);
 }
@@ -950,16 +970,42 @@ __global__ void kernel_mcl_split_to_bucket_g2(
     const int* starts,
     const int* value_ids,
     const int* bucket_ids){
-  int instance = threadIdx.x + blockIdx.x * blockDim.x;
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / N;
+  const int local_id = tid & (N-1);
   if(instance >= data_length) return;
   int bucket_id = bucket_ids[instance];
-  using namespace BigInt256;
   if(bucket_id > 0 && bucket_id < bucket_num){
       int src_i = value_ids[instance];
       int dst_i = instance;
-          Ect2 a;
-          load(a, data, src_i);
-          store(buckets, a, dst_i);
+      //  Ect2 a;
+      //  load(a, data, src_i);
+      //  store(buckets, a, dst_i);
+      Int* in_x_c0 = ((Int*)(data.x.c0.mont_repr_data + src_i)->_limbs);
+      Int* in_x_c1 = ((Int*)(data.x.c1.mont_repr_data + src_i)->_limbs);
+      Int* in_y_c0 = ((Int*)(data.y.c0.mont_repr_data + src_i)->_limbs);
+      Int* in_y_c1 = ((Int*)(data.y.c1.mont_repr_data + src_i)->_limbs);
+      Int* in_z_c0 = ((Int*)(data.z.c0.mont_repr_data + src_i)->_limbs);
+      Int* in_z_c1 = ((Int*)(data.z.c1.mont_repr_data + src_i)->_limbs);
+      Int* out_x_c0 = ((Int*)(buckets.x.c0.mont_repr_data + dst_i)->_limbs);
+      Int* out_x_c1 = ((Int*)(buckets.x.c1.mont_repr_data + dst_i)->_limbs);
+      Int* out_y_c0 = ((Int*)(buckets.y.c0.mont_repr_data + dst_i)->_limbs);
+      Int* out_y_c1 = ((Int*)(buckets.y.c1.mont_repr_data + dst_i)->_limbs);
+      Int* out_z_c0 = ((Int*)(buckets.z.c0.mont_repr_data + dst_i)->_limbs);
+      Int* out_z_c1 = ((Int*)(buckets.z.c1.mont_repr_data + dst_i)->_limbs);
+      Ect2 a;
+      a.x.c0[local_id] = in_x_c0[local_id];
+      a.x.c1[local_id] = in_x_c1[local_id];
+      a.y.c0[local_id] = in_y_c0[local_id];
+      a.y.c1[local_id] = in_y_c1[local_id];
+      a.z.c0[local_id] = in_z_c0[local_id];
+      a.z.c1[local_id] = in_z_c1[local_id];
+      out_x_c0[local_id] = a.x.c0[local_id];
+      out_x_c1[local_id] = a.x.c1[local_id];
+      out_y_c0[local_id] = a.y.c0[local_id];
+      out_y_c1[local_id] = a.y.c1[local_id];
+      out_z_c0[local_id] = a.z.c0[local_id];
+      out_z_c1[local_id] = a.z.c1[local_id];
     }
 }
 
@@ -983,7 +1029,7 @@ void mcl_split_to_bucket_g2(
   thrust::sort_by_key(thrust::cuda::par.on(stream), bucket_ids, bucket_ids + data_length, value_ids); 
 
   blocks = (data_length + 63) / 64;
-  threads = 64;
+  threads = 64*N;
   kernel_mcl_split_to_bucket_g2<<<blocks, threads, 0, stream>>>(data, out, data_length, bucket_num, starts, value_ids, bucket_ids);
 }
 
@@ -1037,20 +1083,64 @@ __global__ void kernel_mcl_copy_g2(
     mcl_bn128_g2 buckets,
     mcl_bn128_g2 zero,
     const int bucket_num){
-  const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const int instance = tid / N;
+  const int local_id = tid & (N-1);
   if(instance >= bucket_num) return;
   int bid = instance;
   int start = starts[bid];
   int end = ends[bid];
-  using namespace BigInt256;
+  Int* out_x_c0 = ((Int*)(buckets.x.c0.mont_repr_data + bid * Offset)->_limbs);
+  Int* out_x_c1 = ((Int*)(buckets.x.c1.mont_repr_data + bid * Offset)->_limbs);
+  Int* out_y_c0 = ((Int*)(buckets.y.c0.mont_repr_data + bid * Offset)->_limbs);
+  Int* out_y_c1 = ((Int*)(buckets.y.c1.mont_repr_data + bid * Offset)->_limbs);
+  Int* out_z_c0 = ((Int*)(buckets.z.c0.mont_repr_data + bid * Offset)->_limbs);
+  Int* out_z_c1 = ((Int*)(buckets.z.c1.mont_repr_data + bid * Offset)->_limbs);
   if(end - start == 0){
+      Int* in_x_c0 = ((Int*)(zero.x.c0.mont_repr_data)->_limbs);
+      Int* in_x_c1 = ((Int*)(zero.x.c1.mont_repr_data)->_limbs);
+      Int* in_y_c0 = ((Int*)(zero.y.c0.mont_repr_data)->_limbs);
+      Int* in_y_c1 = ((Int*)(zero.y.c1.mont_repr_data)->_limbs);
+      Int* in_z_c0 = ((Int*)(zero.z.c0.mont_repr_data)->_limbs);
+      Int* in_z_c1 = ((Int*)(zero.z.c1.mont_repr_data)->_limbs);
       Ect2 dev_zero;
-      load(dev_zero, zero, 0);
-      store(buckets, dev_zero, bid * Offset);
+      //load(dev_zero, zero, 0);
+      //store(buckets, dev_zero, bid * Offset);
+      dev_zero.x.c0[local_id] = in_x_c0[local_id];
+      dev_zero.x.c1[local_id] = in_x_c1[local_id];
+      dev_zero.y.c0[local_id] = in_y_c0[local_id];
+      dev_zero.y.c1[local_id] = in_y_c1[local_id];
+      dev_zero.z.c0[local_id] = in_z_c0[local_id];
+      dev_zero.z.c1[local_id] = in_z_c1[local_id];
+      out_x_c0[local_id] = dev_zero.x.c0[local_id];
+      out_x_c1[local_id] = dev_zero.x.c1[local_id];
+      out_y_c0[local_id] = dev_zero.y.c0[local_id];
+      out_y_c1[local_id] = dev_zero.y.c1[local_id];
+      out_z_c0[local_id] = dev_zero.z.c0[local_id];
+      out_z_c1[local_id] = dev_zero.z.c1[local_id];
   }else{
       Ect2 a;
-      load(a, data, start);
-      store(buckets, a, bid * Offset);
+      //load(a, data, start);
+      //store(buckets, a, bid * Offset);
+      Int* in_x_c0 = ((Int*)(data.x.c0.mont_repr_data + start)->_limbs);
+      Int* in_x_c1 = ((Int*)(data.x.c1.mont_repr_data + start)->_limbs);
+      Int* in_y_c0 = ((Int*)(data.y.c0.mont_repr_data + start)->_limbs);
+      Int* in_y_c1 = ((Int*)(data.y.c1.mont_repr_data + start)->_limbs);
+      Int* in_z_c0 = ((Int*)(data.z.c0.mont_repr_data + start)->_limbs);
+      Int* in_z_c1 = ((Int*)(data.z.c1.mont_repr_data + start)->_limbs);
+      a.x.c0[local_id] = in_x_c0[local_id];
+      a.x.c1[local_id] = in_x_c1[local_id];
+      a.y.c0[local_id] = in_y_c0[local_id];
+      a.y.c1[local_id] = in_y_c1[local_id];
+      a.z.c0[local_id] = in_z_c0[local_id];
+      a.z.c1[local_id] = in_z_c1[local_id];
+
+      out_x_c0[local_id] = a.x.c0[local_id];
+      out_x_c1[local_id] = a.x.c1[local_id];
+      out_y_c0[local_id] = a.y.c0[local_id];
+      out_y_c1[local_id] = a.y.c1[local_id];
+      out_z_c0[local_id] = a.z.c0[local_id];
+      out_z_c1[local_id] = a.z.c1[local_id];
   }
 }
 
@@ -1102,32 +1192,55 @@ void mcl_bucket_reduce_sum_g2(
           kernel_mcl_update_ends2<<<blocks, threads, 0, stream>>>(starts, half_sizes, ends, bucket_num);
           //CUDA_CHECK(cudaDeviceSynchronize());
       }
-  }else{
   }
   int local_instances = 64;
-  threads = local_instances;
+  threads = local_instances * N;
   blocks = (bucket_num + local_instances-1) / local_instances;
   kernel_mcl_copy_g2<BUCKET_INSTANCES><<<blocks, threads, 0, stream>>>(data, starts, ends, buckets, t_zero, bucket_num);
 }
 
 __global__ void kernel_mcl_reverse_g2(
     mcl_bn128_g2 data, mcl_bn128_g2 out, int n, int offset){
-  int instance = blockIdx.x * blockDim.x + threadIdx.x;
-  using namespace BigInt256;
-  for(int i = instance; i < n; i += gridDim.x * blockDim.x){
-      int in_i = i * offset;
-      int out_i = n - i - 1;
-      Ect2 a;
-      load(a, data, in_i);
-      store(out, a, out_i);
-    }
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int instance = tid / N;
+  const int local_id = tid & (N-1);
+  int in_i = instance * offset;
+  int out_i = n - instance - 1;
+  Ect2 a;
+  //load(a, data, in_i);
+  //store(out, a, out_i);
+  Int* out_x_c0 = ((Int*)(out.x.c0.mont_repr_data + out_i)->_limbs);
+  Int* out_x_c1 = ((Int*)(out.x.c1.mont_repr_data + out_i)->_limbs);
+  Int* out_y_c0 = ((Int*)(out.y.c0.mont_repr_data + out_i)->_limbs);
+  Int* out_y_c1 = ((Int*)(out.y.c1.mont_repr_data + out_i)->_limbs);
+  Int* out_z_c0 = ((Int*)(out.z.c0.mont_repr_data + out_i)->_limbs);
+  Int* out_z_c1 = ((Int*)(out.z.c1.mont_repr_data + out_i)->_limbs);
+
+  Int* in_x_c0 = ((Int*)(data.x.c0.mont_repr_data + in_i)->_limbs);
+  Int* in_x_c1 = ((Int*)(data.x.c1.mont_repr_data + in_i)->_limbs);
+  Int* in_y_c0 = ((Int*)(data.y.c0.mont_repr_data + in_i)->_limbs);
+  Int* in_y_c1 = ((Int*)(data.y.c1.mont_repr_data + in_i)->_limbs);
+  Int* in_z_c0 = ((Int*)(data.z.c0.mont_repr_data + in_i)->_limbs);
+  Int* in_z_c1 = ((Int*)(data.z.c1.mont_repr_data + in_i)->_limbs);
+  a.x.c0[local_id] = in_x_c0[local_id];
+  a.x.c1[local_id] = in_x_c1[local_id];
+  a.y.c0[local_id] = in_y_c0[local_id];
+  a.y.c1[local_id] = in_y_c1[local_id];
+  a.z.c0[local_id] = in_z_c0[local_id];
+  a.z.c1[local_id] = in_z_c1[local_id];
+
+  out_x_c0[local_id] = a.x.c0[local_id];
+  out_x_c1[local_id] = a.x.c1[local_id];
+  out_y_c0[local_id] = a.y.c0[local_id];
+  out_y_c1[local_id] = a.y.c1[local_id];
+  out_z_c0[local_id] = a.z.c0[local_id];
+  out_z_c1[local_id] = a.z.c1[local_id];
 }
 
 void mcl_reverse_g2(mcl_bn128_g2 in, mcl_bn128_g2 out, const int n, const int offset, CudaStream stream){
-  const int threads = 64;
+  const int threads = 64 * N;
   int reverse_blocks = (n + 63) / 64;
   kernel_mcl_reverse_g2<<<reverse_blocks, threads, 0, stream>>>(in, out, n, offset);
-  //CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void kernel_mcl_reduce_sum_g2_new(
