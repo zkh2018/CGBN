@@ -84,7 +84,10 @@ __global__ void kernel2(BigInt256::Ect2 R){
    memcpy(Q.z.c1, q_z_c1, 32);
 
 
-   BigInt256::add_g2(R, P, Q, one, p, specialA_, a_, mode_, rp);
+    __shared__ Ect2 tmp;
+   BigInt256::add_g2(tmp, P, Q, one, p, specialA_, a_, mode_, rp);
+
+   R.set(tmp);
 
    printf("result:\n\n");
    for(int i = 0; i < 4; i++){

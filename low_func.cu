@@ -9,37 +9,6 @@
 
 namespace gpu{
 
-__global__ void kernel_reduce_sum_pre_new(
-    const Fp_model scalars,
-    char* flags,
-    const Fp_model field_zero,
-    const Fp_model field_one,
-    const int n,
-    char *density,
-    cgbn_mem_t<BITS>* bn_exponents,
-    cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv){
-    int tid = threadIdx.x + blockDim.x * blockIdx.x;
-    using namespace BigInt256;
-    Int256 local_zero, local_one;
-    memcpy(local_zero, field_zero.mont_repr_data, sizeof(Int256));
-    memcpy(local_one, field_one.mont_repr_data, sizeof(Int256));
-    for(int i = tid; i < n; i+=gridDim.x * blockDim.x){
-        //Int *scalar = (Int*)(scalars.mont_repr_data + i);
-        Int256 scalar;
-        memcpy(scalar, scalars.mont_repr_data + i, sizeof(Int256));
-        if(BigInt256::dev_equal(scalar, local_zero)){
-        }
-        else if(BigInt256::dev_equal(scalar, local_one)){
-            flags[i] = 1;
-        }else{
-            density[i] = 1;
-            Int res[BigInt256::N];
-            BigInt256::dev_as_bigint(scalar, (Int*)field_modulus, field_inv, res);
-            memcpy(bn_exponents + i, res, BigInt256::N*sizeof(Int));
-        }
-    }
-}
-
 __global__ void kernel_mcl_bn128_g1_reduce_sum_pre_new(
     const Fp_model scalars,
     const size_t *index_it,
@@ -242,27 +211,25 @@ int mcl_bn128_g1_reduce_sum(
   dim3 blocks(block_x, ranges_size, 1);
   kernel_mcl_bn128_g1_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
 
-  if(true){
-      int n = max_reduce_depth;
-      const int local_instances2 = 64;
-      threads = local_instances2;
+  int n = max_reduce_depth;
+  const int local_instances2 = 64;
+  threads = local_instances2;
+  uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
+  dim3 blocks2(block_x2, ranges_size, 1);
+  kernel_mcl_bn128_g1_reduce_sum_one_range5_new<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+  const int update_threads = 64;
+  const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
+  kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
+  //CUDA_CHECK(cudaDeviceSynchronize());
+  n = (n+1)/2;
+  while(n>=2){
       uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
       dim3 blocks2(block_x2, ranges_size, 1);
-      kernel_mcl_bn128_g1_reduce_sum_one_range5_new<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
-      const int update_threads = 64;
-      const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
+      kernel_mcl_bn128_g1_reduce_sum_one_range7_new<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+      //CUDA_CHECK(cudaDeviceSynchronize());
       kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
       //CUDA_CHECK(cudaDeviceSynchronize());
       n = (n+1)/2;
-      while(n>=2){
-          uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
-          dim3 blocks2(block_x2, ranges_size, 1);
-          kernel_mcl_bn128_g1_reduce_sum_one_range7_new<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
-          //CUDA_CHECK(cudaDeviceSynchronize());
-          kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
-          //CUDA_CHECK(cudaDeviceSynchronize());
-          n = (n+1)/2;
-      }
   }
 
   kernel_mcl_bn128_g1_reduce_sum_one_range6_new<<<1, 1, 0, stream>>>(partial, ranges_size, firsts, one, p, a, specialA_, mode_, rp);
@@ -913,52 +880,34 @@ int mcl_bn128_g2_reduce_sum_new(
     const int max_reduce_depth, const int values_size, cudaStream_t stream
     ){
 
-  if(true){
-      uint32_t threads = 64;//TPI * 64;
-      const int local_instances = 64 * BlockDepth;
-      uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
-      dim3 blocks(block_x, ranges_size, 1);
-      kernel_mcl_bn128_g1_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
-  }else{
-      int threads = 256;
-      int blocks = (values_size + threads - 1) / threads;
-      kernel_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, flags, field_zero, field_one, values_size, density, bn_exponents, field_modulus, field_inv);
-  }
+    uint32_t threads = 64;//TPI * 64;
+    const int local_instances = 64 * BlockDepth;
+    uint32_t block_x =  (max_reduce_depth + local_instances - 1) / local_instances;
+    dim3 blocks(block_x, ranges_size, 1);
+    kernel_mcl_bn128_g1_reduce_sum_pre_new<<<blocks, threads, 0, stream>>>(scalars, index_it, counters, flags, ranges_size, firsts, seconds, field_zero, field_one, density, bn_exponents, field_modulus, field_inv);
 
-  const int blocks_per_range = REDUCE_BLOCKS_PER_RANGE;
-  const int threads_per_block = INSTANCES_PER_BLOCK;
+  //const int blocks_per_range = REDUCE_BLOCKS_PER_RANGE;
+  //const int threads_per_block = INSTANCES_PER_BLOCK;
 
-  if(true){
-      int n = max_reduce_depth;
-      const int local_instances2 = 64;
-      int threads = local_instances2;
+  int n = max_reduce_depth;
+  const int local_instances2 = 64;
+  threads = local_instances2;
+  uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
+  dim3 blocks2(block_x2, ranges_size, 1);
+  kernel_mcl_bn128_g2_reduce_sum_one_range5<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
+  const int update_threads = 64;
+  const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
+  kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
+  //CUDA_CHECK(cudaDeviceSynchronize());
+  n = (n+1)/2;
+  while(n>=2){
       uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
       dim3 blocks2(block_x2, ranges_size, 1);
-      kernel_mcl_bn128_g2_reduce_sum_one_range5<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(values, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
-      const int update_threads = 64;
-      const int update_blocks = (ranges_size + update_threads - 1) / update_threads;
+      kernel_mcl_bn128_g2_reduce_sum_one_range7<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
       kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
-      //CUDA_CHECK(cudaDeviceSynchronize());
       n = (n+1)/2;
-      while(n>=2){
-          uint32_t block_x2 =  ((n+1)/2 + local_instances2 - 1) / local_instances2;
-          dim3 blocks2(block_x2, ranges_size, 1);
-          kernel_mcl_bn128_g2_reduce_sum_one_range7<<<blocks2, dim3(threads, 1, 1), 0, stream>>>(partial, scalars, index_it, partial, ranges_size, 0, firsts, seconds, flags, t_zero, one, p, a, specialA_, mode_, rp);
-          kernel_mcl_update_seconds<<<update_blocks, update_threads, 0, stream>>>(firsts, seconds, ranges_size);
-          n = (n+1)/2;
-      }
-      kernel_mcl_bn128_g2_reduce_sum_one_range6<<<1, 1, 0, stream>>>(partial, ranges_size, firsts, one, p, a, specialA_, mode_, rp);
-  }else{
-      kernel_mcl_bn128_g2_reduce_sum_new<<<dim3(blocks_per_range, ranges_size, 1), threads_per_block, 0, stream>>>(0, 0, values, scalars, index_it, partial, ranges_size, firsts, seconds, flags, one, p, a, specialA_, mode_, t_zero, rp);
-
-      int n = blocks_per_range * INSTANCES_PER_BLOCK * ranges_size;
-      while(n>=2){
-          int half_n = n / 2;
-          int blocks = (half_n + INSTANCES_PER_BLOCK-1) / INSTANCES_PER_BLOCK;
-          kernel_mcl_bn128_g2_reduce_sum_after_new<<<blocks, threads_per_block, 0, stream>>>(partial, half_n, n, one, p, a, specialA_, mode_, rp);
-          n /= 2;
-      }
   }
+  kernel_mcl_bn128_g2_reduce_sum_one_range6<<<1, 1, 0, stream>>>(partial, ranges_size, firsts, one, p, a, specialA_, mode_, rp);
   return 0;
 }
 
@@ -1173,7 +1122,7 @@ void mcl_bucket_reduce_sum_g2(
           //CUDA_CHECK(cudaDeviceSynchronize());
           threads = 256;
           blocks = (bucket_num + threads-1) / threads;
-          kernel_mcl_get_bucket_tids<<<blocks, threads>>>(half_sizes, bucket_num, bucket_tids, bucket_ids);
+          kernel_mcl_get_bucket_tids<<<blocks, threads, 0, stream>>>(half_sizes, bucket_num, bucket_tids, bucket_ids);
           //CUDA_CHECK(cudaDeviceSynchronize());
           int total_instances = 0;
           CUDA_CHECK(cudaMemcpyAsync(&total_instances, half_sizes + bucket_num-1, sizeof(int), cudaMemcpyDeviceToHost, stream)); 
