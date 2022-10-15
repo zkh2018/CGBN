@@ -1251,6 +1251,109 @@ void mcl_bn128_g2_reduce_sum2(
   }
 }
 
+__global__ void kernel_lt_reduce_sum_pre(
+    const Fp_model scalars,
+    const Fp_model field_zero,
+    const Fp_model field_one,
+    const cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
+    const int n,
+    char* flags,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents){
+  using namespace BigInt256;
+  int instance = blockIdx.x * blockDim.x + threadIdx.x;
+  Int256 local_zero, local_one;
+  memcpy(local_zero, field_zero.mont_repr_data, sizeof(Int256));
+  memcpy(local_one, field_one.mont_repr_data, sizeof(Int256));
+
+  for(int i = instance; i < n; i+= gridDim.x * blockDim.x){
+    Int256 scalar;
+    memcpy(scalar, scalars.mont_repr_data + i, sizeof(Int256));
+    if(BigInt256::dev_equal(scalar, local_zero)){
+    }
+    else if(BigInt256::dev_equal(scalar, local_one)){
+      flags[i] = 1;
+    }
+    else{
+        density[i] = 1;
+        Int res[N];
+        dev_as_bigint(scalar, (Int*)field_modulus, field_inv, res);
+        memcpy(bn_exponents + i, res, N*sizeof(Int));
+    }
+  }
+}
+
+__global__ void kernel_lt_reduce_sum_pre2(
+    mcl_bn128_g1 values, 
+    const Fp_model scalars,
+    mcl_bn128_g1 partial, 
+    const int half_n,
+    const int n,
+    const char* flags,
+    const mcl_bn128_g1 t_zero,
+    const Fp_model one, 
+    const Fp_model p, 
+    const Fp_model a, 
+    const int specialA_,
+    const int mode_,
+    const uint64_t rp){
+  using namespace BigInt256;
+  const int instance = threadIdx.x + blockIdx.x * blockDim.x;
+  if(instance >= half_n) return;
+
+  Int256 lone, lp, la;
+  load(lone, one, 0); 
+  load(la, a, 0); 
+  load(lp, p, 0); 
+
+  Ect result;
+  if(flags[instance] == 1){
+	  load(result, values, instance);
+  }else{
+	  load(result, t_zero, 0);
+  }
+  for(int i = instance+half_n; i < n; i+= half_n){
+    if(flags[i] == 1){
+      Ect dev_b;
+      load(dev_b, values, i);
+      add(result, result, dev_b, lone, lp, specialA_, la, mode_, rp);  
+    }
+  }
+  store(partial, result, instance);
+}
+
+void lt_reduce_sum(
+    mcl_bn128_g1 values, 
+    Fp_model scalars, 
+    mcl_bn128_g1 partial, 
+    char* flags,
+    mcl_bn128_g1 t_zero,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* const field_modulus, const uint64_t field_inv,
+    Fp_model one, Fp_model p, Fp_model a, const int specialA_, const int mode_, const uint64_t rp,
+    const int length, cudaStream_t stream
+    ){
+    int n = length;
+  const uint32_t threads = 128;
+  uint32_t blocks =  (n + threads - 1) / threads;
+  kernel_lt_reduce_sum_pre<<<blocks, threads, 0, stream>>>(scalars, field_zero, field_one, field_modulus, field_inv, n, flags, density, bn_exponents);
+
+  int half_n = (n+1)/2;
+  kernel_lt_reduce_sum_pre2<<<blocks , threads, 0, stream>>>(values, scalars, partial, half_n, n, flags, t_zero, one, p, a, specialA_, mode_, rp);
+  //CUDA_CHECK(cudaDeviceSynchronize());
+  n = half_n;
+  while(n > 1){
+      half_n = (n + 1) / 2;
+      blocks = (half_n + threads - 1) / threads;
+      kernel_mcl_reduce_sum_new<<<blocks, threads, 0, stream>>>(partial, partial, half_n, n, one, p, a, specialA_, mode_, rp);
+      n = half_n;
+  }
+}
+
+
 }// namespace gpu
 
 #endif

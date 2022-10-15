@@ -31,6 +31,20 @@ int mcl_bn128_g1_reduce_sum(
     Fp_model one, Fp_model p, Fp_model a, const int specialA_, const int mode_, const uint64_t rp,
     const int max_reduce_depth, cudaStream_t stream);
 
+void lt_reduce_sum(
+    mcl_bn128_g1 values, 
+    Fp_model scalars, 
+    mcl_bn128_g1 partial, 
+    char* flags,
+    mcl_bn128_g1 t_zero,
+    Fp_model field_zero,
+    Fp_model field_one,
+    char *density,
+    cgbn_mem_t<BITS>* bn_exponents,
+    cgbn_mem_t<BITS>* field_modulus, const uint64_t field_inv,
+    Fp_model one, Fp_model p, Fp_model a, const int specialA_, const int mode_, const uint64_t rp,
+    const int length, cudaStream_t stream);
+
 void mcl_bucket_counter(
     const bool with_density,
     const char* density,
